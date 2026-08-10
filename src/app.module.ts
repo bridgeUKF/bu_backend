@@ -1,10 +1,49 @@
-import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { Module, RequestMethod } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { LoggerModule } from 'nestjs-pino';
+import { appConfig } from './config/app.config';
+import { validateEnv } from './config/env.validation';
+import { HealthModule } from './health/health.module';
+import { DatabaseModule } from './infrastructure/database/database.module';
+import { RedisModule } from './infrastructure/redis/redis.module';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+      expandVariables: true,
+      load: [appConfig],
+      validate: validateEnv,
+    }),
+    LoggerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        forRoutes: [{ path: '{*path}', method: RequestMethod.ALL }],
+        pinoHttp: {
+          level: configService.get<string>('app.logLevel') ?? 'info',
+          autoLogging: true,
+          redact: ['req.headers.authorization', 'req.headers.cookie'],
+          customProps: (req) => ({
+            requestId: req.id,
+          }),
+          transport:
+            configService.get<string>('app.nodeEnv') === 'development'
+              ? {
+                  target: 'pino-pretty',
+                  options: {
+                    colorize: true,
+                    translateTime: 'SYS:standard',
+                    singleLine: true,
+                  },
+                }
+              : undefined,
+        },
+      }),
+    }),
+    DatabaseModule,
+    RedisModule,
+    HealthModule,
+  ],
 })
 export class AppModule {}
