@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { UserStatus } from '@prisma/client';
 import {
   CreateUserRepositoryData,
+  RoleName,
   UserAuthRecord,
   UserRecord,
   UserRepository,
@@ -39,5 +40,21 @@ export class UserService {
     };
 
     return this.userRepository.create(createUserData);
+  }
+
+  createWithRole(
+    data: CreateUserData,
+    roleName: RoleName,
+  ): Promise<UserRecord> {
+    const createUserData: CreateUserRepositoryData = {
+      email: data.email,
+      passwordHash: data.passwordHash,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      status: data.status,
+      emailVerifiedAt: data.emailVerifiedAt,
+    };
+
+    return this.userRepository.createWithRole(createUserData, roleName);
   }
 }

@@ -35,6 +35,15 @@ export type CreateUserRepositoryData = {
   emailVerifiedAt?: Date | null;
 };
 
+export type RoleName = 'USER' | 'MODERATOR' | 'ADMIN';
+
+export class RoleNotFoundError extends Error {
+  constructor(roleName: RoleName) {
+    super(`Role "${roleName}" was not found`);
+    this.name = 'RoleNotFoundError';
+  }
+}
+
 @Injectable()
 export class UserRepository {
   constructor(private readonly prismaService: PrismaService) {}
@@ -64,6 +73,43 @@ export class UserRepository {
         emailVerifiedAt: data.emailVerifiedAt,
       },
       select: userPublicSelect,
+    });
+  }
+
+  createWithRole(
+    data: CreateUserRepositoryData,
+    roleName: RoleName,
+  ): Promise<UserRecord> {
+    return this.prismaService.$transaction(async (prisma) => {
+      const user = await prisma.user.create({
+        data: {
+          email: data.email,
+          passwordHash: data.passwordHash,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          status: data.status,
+          emailVerifiedAt: data.emailVerifiedAt,
+        },
+        select: userPublicSelect,
+      });
+
+      const role = await prisma.role.findUnique({
+        where: { name: roleName },
+        select: { id: true },
+      });
+
+      if (!role) {
+        throw new RoleNotFoundError(roleName);
+      }
+
+      await prisma.userRole.create({
+        data: {
+          userId: user.id,
+          roleId: role.id,
+        },
+      });
+
+      return user;
     });
   }
 }

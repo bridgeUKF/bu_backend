@@ -27,6 +27,7 @@ describe('UserService', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       create: jest.fn(),
+      createWithRole: jest.fn(),
     } as unknown as jest.Mocked<UserRepository>;
 
     userService = new UserService(userRepository);
@@ -74,5 +75,26 @@ describe('UserService', () => {
 
     await expect(userService.create(createData)).resolves.toEqual(userRecord);
     expect(userRepository.create.mock.calls[0]).toEqual([createData]);
+  });
+
+  it('createWithRole delegates atomic provisioning to the repository', async () => {
+    const createData = {
+      email: 'new@example.com',
+      passwordHash: 'hashed-password',
+      firstName: 'Grace',
+      lastName: 'Hopper',
+      status: UserStatus.PENDING,
+      emailVerifiedAt: null,
+    };
+
+    userRepository.createWithRole.mockResolvedValue(userRecord);
+
+    await expect(
+      userService.createWithRole(createData, 'USER'),
+    ).resolves.toEqual(userRecord);
+    expect(userRepository.createWithRole.mock.calls[0]).toEqual([
+      createData,
+      'USER',
+    ]);
   });
 });
