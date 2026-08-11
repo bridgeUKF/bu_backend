@@ -31,7 +31,7 @@ model Role {
   name  String     @unique
   users UserRole[]
 }
-
+  
 model UserRole {
   userId    String
   roleId    String

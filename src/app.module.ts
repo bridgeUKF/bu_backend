@@ -6,6 +6,7 @@ import { validateEnv } from './config/env.validation';
 import { HealthModule } from './health/health.module';
 import { DatabaseModule } from './infrastructure/database/database.module';
 import { RedisModule } from './infrastructure/redis/redis.module';
+import { UserModule } from './user/user.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { RedisModule } from './infrastructure/redis/redis.module';
     DatabaseModule,
     RedisModule,
     HealthModule,
+    UserModule,
   ],
 })
 export class AppModule {}
