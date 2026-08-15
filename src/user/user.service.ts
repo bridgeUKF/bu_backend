@@ -8,6 +8,8 @@ import {
   UserRepository,
 } from './user.repository';
 
+export type { UserAuthRecord, UserRecord } from './user.repository';
+
 export type CreateUserData = {
   email: string;
   passwordHash: string;
