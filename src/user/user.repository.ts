@@ -16,6 +16,15 @@ const userPublicSelect = {
 const userAuthSelect = {
   ...userPublicSelect,
   passwordHash: true,
+  roles: {
+    select: {
+      role: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  },
 } satisfies Prisma.UserSelect;
 
 export type UserRecord = Prisma.UserGetPayload<{

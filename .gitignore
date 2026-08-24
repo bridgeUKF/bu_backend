@@ -54,3 +54,13 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Local AI assistant settings and private project context
+/.openclaude/
+/.opencode/
+/.codex/
+/.claude/settings.local.json
+/.aider/
+/.continue/
+/opencode.json
+/PROJECT_CONTEXT.md

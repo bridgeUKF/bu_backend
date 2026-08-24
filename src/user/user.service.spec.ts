@@ -20,6 +20,7 @@ describe('UserService', () => {
   const userAuthRecord: UserAuthRecord = {
     ...userRecord,
     passwordHash: 'hashed-password',
+    roles: [{ role: { name: 'USER' } }],
   };
 
   beforeEach(() => {
