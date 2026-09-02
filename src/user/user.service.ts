@@ -31,6 +31,10 @@ export class UserService {
     return this.userRepository.findByEmail(email);
   }
 
+  findAuthById(id: string): Promise<UserAuthRecord | null> {
+    return this.userRepository.findAuthById(id);
+  }
+
   create(data: CreateUserData): Promise<UserRecord> {
     const createUserData: CreateUserRepositoryData = {
       email: data.email,

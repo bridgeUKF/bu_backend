@@ -20,8 +20,18 @@ import { type UserAuthRecord, UserService } from './../src/user/user.service';
 describe('App (e2e)', () => {
   let app: NestFastifyApplication;
   let userService: jest.Mocked<UserService>;
-  let sessionRepository: { create: jest.Mock };
-  let tokenService: { generateAccessToken: jest.Mock };
+  let sessionRepository: {
+    create: jest.Mock;
+    findById: jest.Mock;
+    findByRefreshTokenHash: jest.Mock;
+    updateRefreshToken: jest.Mock;
+    revoke: jest.Mock;
+    revokeAllForUser: jest.Mock;
+  };
+  let tokenService: {
+    generateAccessToken: jest.Mock;
+    verifyAccessToken: jest.Mock;
+  };
   let activeUserAuthRecord: UserAuthRecord;
   let pendingUserAuthRecord: UserAuthRecord;
 
@@ -56,6 +66,7 @@ describe('App (e2e)', () => {
     userService = {
       findById: jest.fn(),
       findByEmail: jest.fn(),
+      findAuthById: jest.fn(),
       create: jest.fn(),
       createWithRole: jest.fn(),
     } as unknown as jest.Mocked<UserService>;
@@ -71,10 +82,16 @@ describe('App (e2e)', () => {
         lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
         revokedAt: null,
       }),
+      findById: jest.fn(),
+      findByRefreshTokenHash: jest.fn(),
+      updateRefreshToken: jest.fn(),
+      revoke: jest.fn(),
+      revokeAllForUser: jest.fn(),
     };
 
     tokenService = {
       generateAccessToken: jest.fn().mockReturnValue('test-access-token'),
+      verifyAccessToken: jest.fn(),
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -331,6 +348,202 @@ describe('App (e2e)', () => {
       statusCode: 400,
       error: 'Bad Request',
     });
+  });
+
+  it('/api/v1/auth/refresh (POST) rotates tokens for a valid session', async () => {
+    sessionRepository.findByRefreshTokenHash.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      refreshTokenHash: 'stored-hash',
+      expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+      createdAt: new Date('2026-08-11T08:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+      lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+      revokedAt: null,
+    });
+    sessionRepository.updateRefreshToken.mockImplementation(
+      (id: string, refreshTokenHash: string) =>
+        Promise.resolve({
+          id,
+          userId: 'user-1',
+          refreshTokenHash,
+          expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+          createdAt: new Date('2026-08-11T08:00:00.000Z'),
+          updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+          lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+          revokedAt: null,
+        }),
+    );
+    userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      cookies: { refresh_token: 'valid-refresh-token' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      accessToken: 'test-access-token',
+      user: {
+        id: userRecord.id,
+        email: userRecord.email,
+        status: UserStatus.ACTIVE,
+      },
+    });
+    expect(response.json()).not.toHaveProperty('passwordHash');
+    expect(response.json()).not.toHaveProperty('refreshToken');
+    expect(response.headers['set-cookie']).toContain('refresh_token=');
+    expect(response.headers['set-cookie']).toContain('HttpOnly');
+    expect(sessionRepository.updateRefreshToken).toHaveBeenCalled();
+  });
+
+  it('/api/v1/auth/refresh (POST) rejects a missing cookie', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      statusCode: 401,
+      message: 'Invalid refresh token',
+      error: 'Unauthorized',
+    });
+    expect(sessionRepository.updateRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('/api/v1/auth/refresh (POST) rejects an unknown token', async () => {
+    sessionRepository.findByRefreshTokenHash.mockResolvedValue(null);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/refresh',
+      cookies: { refresh_token: 'unknown-token' },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      statusCode: 401,
+      message: 'Invalid refresh token',
+      error: 'Unauthorized',
+    });
+    expect(sessionRepository.updateRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('/api/v1/auth/me (GET) returns the current user', async () => {
+    tokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-1',
+      sessionId: 'session-1',
+      roles: ['USER'],
+    });
+    sessionRepository.findById.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      refreshTokenHash: 'stored-hash',
+      expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+      createdAt: new Date('2026-08-11T08:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+      lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+      revokedAt: null,
+    });
+    userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: { authorization: 'Bearer valid-access-token' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id: userRecord.id,
+      email: userRecord.email,
+      status: UserStatus.ACTIVE,
+    });
+    expect(response.json()).not.toHaveProperty('passwordHash');
+  });
+
+  it('/api/v1/auth/me (GET) rejects a missing token', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      statusCode: 401,
+      message: 'Invalid access token',
+      error: 'Unauthorized',
+    });
+  });
+
+  it('/api/v1/auth/logout (POST) revokes the current session and clears the cookie', async () => {
+    sessionRepository.findByRefreshTokenHash.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      refreshTokenHash: 'stored-hash',
+      expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+      createdAt: new Date('2026-08-11T08:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+      lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+      revokedAt: null,
+    });
+    sessionRepository.revoke.mockResolvedValue({
+      id: 'session-1',
+      revokedAt: new Date('2026-08-11T09:00:00.000Z'),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      cookies: { refresh_token: 'current-refresh-token' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(sessionRepository.revoke).toHaveBeenCalledWith('session-1');
+    expect(response.headers['set-cookie']).toContain('refresh_token=');
+  });
+
+  it('/api/v1/auth/logout-all (POST) revokes every session of the user', async () => {
+    tokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-1',
+      sessionId: 'session-1',
+      roles: ['USER'],
+    });
+    sessionRepository.findById.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      refreshTokenHash: 'stored-hash',
+      expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+      createdAt: new Date('2026-08-11T08:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+      lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+      revokedAt: null,
+    });
+    userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+    sessionRepository.revokeAllForUser.mockResolvedValue(2);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout-all',
+      headers: { authorization: 'Bearer valid-access-token' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ revoked: 2 });
+    expect(sessionRepository.revokeAllForUser).toHaveBeenCalledWith('user-1');
+    expect(response.headers['set-cookie']).toContain('refresh_token=');
+  });
+
+  it('/api/v1/auth/logout-all (POST) rejects a missing token', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout-all',
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(sessionRepository.revokeAllForUser).not.toHaveBeenCalled();
   });
 
   afterEach(async () => {

@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { UserAuthRecord, UserRecord, UserService } from '../user/user.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -18,10 +18,19 @@ export type LoginResponse = {
   user: UserRecord;
 };
 
+export type AuthenticatedUser = {
+  id: string;
+  sessionId: string;
+  roles: string[];
+  user: UserRecord;
+};
+
 @Injectable()
 export class AuthService {
   private static readonly invalidCredentialsMessage =
     'Invalid email or password';
+  private static readonly invalidRefreshTokenMessage = 'Invalid refresh token';
+  private static readonly invalidAccessTokenMessage = 'Invalid access token';
 
   constructor(
     private readonly userService: UserService,
@@ -46,7 +55,7 @@ export class AuthService {
     }
 
     const refreshToken = this.generateRefreshToken();
-    const refreshTokenHash = await argon2.hash(refreshToken);
+    const refreshTokenHash = this.hashRefreshToken(refreshToken);
     const session = await this.sessionRepository.create({
       userId: user.id,
       refreshTokenHash,
@@ -65,6 +74,100 @@ export class AuthService {
       refreshToken,
       user: this.toUserRecord(user),
     };
+  }
+
+  async refresh(refreshToken: string | undefined): Promise<LoginResponse> {
+    if (!refreshToken) {
+      throw new UnauthorizedException(AuthService.invalidRefreshTokenMessage);
+    }
+
+    const session = await this.sessionRepository.findByRefreshTokenHash(
+      this.hashRefreshToken(refreshToken),
+    );
+
+    if (
+      !session ||
+      session.revokedAt ||
+      session.expiresAt.getTime() <= Date.now()
+    ) {
+      throw new UnauthorizedException(AuthService.invalidRefreshTokenMessage);
+    }
+
+    const user = await this.userService.findAuthById(session.userId);
+
+    if (!user || !this.canAuthenticate(user.status)) {
+      throw new UnauthorizedException(AuthService.invalidRefreshTokenMessage);
+    }
+
+    const nextRefreshToken = this.generateRefreshToken();
+    const updatedSession = await this.sessionRepository.updateRefreshToken(
+      session.id,
+      this.hashRefreshToken(nextRefreshToken),
+    );
+
+    const accessToken = this.tokenService.generateAccessToken({
+      sub: user.id,
+      sessionId: updatedSession.id,
+      roles: user.roles.map((userRole) => userRole.role.name),
+    });
+
+    return {
+      accessToken,
+      refreshToken: nextRefreshToken,
+      user: this.toUserRecord(user),
+    };
+  }
+
+  async validateAccess(token: string): Promise<AuthenticatedUser> {
+    const payload = this.tokenService.verifyAccessToken(token);
+
+    if (!payload.sessionId) {
+      throw new UnauthorizedException(AuthService.invalidAccessTokenMessage);
+    }
+
+    const session = await this.sessionRepository.findById(payload.sessionId);
+
+    if (
+      !session ||
+      session.revokedAt ||
+      session.expiresAt.getTime() <= Date.now() ||
+      session.userId !== payload.sub
+    ) {
+      throw new UnauthorizedException(AuthService.invalidAccessTokenMessage);
+    }
+
+    const user = await this.userService.findAuthById(payload.sub);
+
+    if (!user || !this.canAuthenticate(user.status)) {
+      throw new UnauthorizedException(AuthService.invalidAccessTokenMessage);
+    }
+
+    return {
+      id: user.id,
+      sessionId: session.id,
+      roles: payload.roles,
+      user: this.toUserRecord(user),
+    };
+  }
+
+  async logout(refreshToken: string | undefined): Promise<void> {
+    if (!refreshToken) {
+      return;
+    }
+
+    const session = await this.sessionRepository.findByRefreshTokenHash(
+      this.hashRefreshToken(refreshToken),
+    );
+
+    if (!session || session.revokedAt) {
+      return;
+    }
+
+    await this.sessionRepository.revoke(session.id);
+  }
+
+  logoutAll(userId: string): Promise<number> {
+    return this.sessionRepository.revokeAllForUser(userId);
   }
 
   async register(registerDto: RegisterDto): Promise<UserRecord> {
@@ -102,6 +205,10 @@ export class AuthService {
 
   private generateRefreshToken(): string {
     return randomBytes(32).toString('hex');
+  }
+
+  private hashRefreshToken(refreshToken: string): string {
+    return createHash('sha256').update(refreshToken).digest('hex');
   }
 
   private canAuthenticate(status: UserStatus): boolean {

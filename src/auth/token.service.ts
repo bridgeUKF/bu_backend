@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 
@@ -30,5 +30,13 @@ export class TokenService {
         expiresIn,
       },
     );
+  }
+
+  verifyAccessToken(token: string): AccessTokenPayload {
+    try {
+      return this.jwtService.verify<AccessTokenPayload>(token);
+    } catch {
+      throw new UnauthorizedException('Invalid access token');
+    }
   }
 }

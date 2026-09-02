@@ -49,6 +49,13 @@ export class SessionRepository {
     });
   }
 
+  findById(id: string): Promise<SessionRecord | null> {
+    return this.prismaService.session.findUnique({
+      where: { id },
+      select: sessionSelect,
+    });
+  }
+
   revoke(id: string, revokedAt: Date = new Date()): Promise<SessionRecord> {
     return this.prismaService.session.update({
       where: { id },
@@ -57,13 +64,22 @@ export class SessionRepository {
     });
   }
 
+  revokeAllForUser(userId: string): Promise<number> {
+    return this.prismaService.session
+      .updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      })
+      .then((result) => result.count);
+  }
+
   updateRefreshToken(
     id: string,
     refreshTokenHash: string,
   ): Promise<SessionRecord> {
     return this.prismaService.session.update({
       where: { id },
-      data: { refreshTokenHash },
+      data: { refreshTokenHash, lastUsedAt: new Date() },
       select: sessionSelect,
     });
   }

@@ -1,12 +1,13 @@
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { Prisma, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { createHash } from 'crypto';
 import { UserAuthRecord, UserRecord } from '../user/user.repository';
 import { UserService } from '../user/user.service';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-import { SessionRepository } from './session.repository';
+import { SessionRecord, SessionRepository } from './session.repository';
 import { TokenService } from './token.service';
 
 jest.mock('argon2', () => ({
@@ -17,8 +18,18 @@ jest.mock('argon2', () => ({
 describe('AuthService', () => {
   let authService: AuthService;
   let userService: jest.Mocked<UserService>;
-  let tokenService: { generateAccessToken: jest.Mock };
-  let sessionRepository: { create: jest.Mock };
+  let tokenService: {
+    generateAccessToken: jest.Mock;
+    verifyAccessToken: jest.Mock;
+  };
+  let sessionRepository: {
+    create: jest.Mock;
+    findById: jest.Mock;
+    findByRefreshTokenHash: jest.Mock;
+    updateRefreshToken: jest.Mock;
+    revoke: jest.Mock;
+    revokeAllForUser: jest.Mock;
+  };
   let hashMock: jest.MockedFunction<typeof argon2.hash>;
   let verifyMock: jest.MockedFunction<typeof argon2.verify>;
 
@@ -51,16 +62,32 @@ describe('AuthService', () => {
     password: 'secret123',
   };
 
+  const sha256hex = (value: string): string =>
+    createHash('sha256').update(value).digest('hex');
+
+  const activeSession: SessionRecord = {
+    id: 'session-1',
+    userId: 'user-1',
+    refreshTokenHash: 'stored-refresh-hash',
+    expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+    createdAt: new Date('2026-08-15T08:00:00.000Z'),
+    updatedAt: new Date('2026-08-15T08:00:00.000Z'),
+    lastUsedAt: new Date('2026-08-15T08:00:00.000Z'),
+    revokedAt: null,
+  };
+
   beforeEach(() => {
     userService = {
       findById: jest.fn(),
       findByEmail: jest.fn(),
+      findAuthById: jest.fn(),
       create: jest.fn(),
       createWithRole: jest.fn(),
     } as unknown as jest.Mocked<UserService>;
 
     tokenService = {
       generateAccessToken: jest.fn().mockReturnValue('signed-access-token'),
+      verifyAccessToken: jest.fn(),
     };
 
     sessionRepository = {
@@ -74,6 +101,11 @@ describe('AuthService', () => {
         lastUsedAt: new Date('2026-08-15T08:00:00.000Z'),
         revokedAt: null,
       }),
+      findById: jest.fn(),
+      findByRefreshTokenHash: jest.fn(),
+      updateRefreshToken: jest.fn(),
+      revoke: jest.fn(),
+      revokeAllForUser: jest.fn(),
     };
 
     authService = new AuthService(
@@ -95,7 +127,6 @@ describe('AuthService', () => {
 
     userService.findByEmail.mockResolvedValue(activeUserAuthRecord);
     verifyMock.mockResolvedValue(true);
-    hashMock.mockResolvedValue('hashed-refresh-token');
 
     const loginResult = await authService.login(loginDto);
 
@@ -118,11 +149,11 @@ describe('AuthService', () => {
     expect(verifyMock.mock.calls).toEqual([
       [activeUserAuthRecord.passwordHash, loginDto.password],
     ]);
-    expect(hashMock.mock.calls).toHaveLength(1);
+    expect(hashMock.mock.calls).toHaveLength(0);
     expect(sessionRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: activeUserAuthRecord.id,
-        refreshTokenHash: 'hashed-refresh-token',
+        refreshTokenHash: sha256hex(loginResult.refreshToken),
       }),
     );
     expect(tokenService.generateAccessToken).toHaveBeenCalledWith({
@@ -141,7 +172,6 @@ describe('AuthService', () => {
 
     userService.findByEmail.mockResolvedValue(activeUserAuthRecord);
     verifyMock.mockResolvedValue(true);
-    hashMock.mockResolvedValue('hashed-refresh-token');
 
     await authService.login(loginDto);
 
@@ -207,7 +237,6 @@ describe('AuthService', () => {
 
     userService.findByEmail.mockResolvedValue(activeUserAuthRecord);
     verifyMock.mockResolvedValue(true);
-    hashMock.mockResolvedValue('hashed-refresh-token');
 
     const result = await authService.login(loginDto);
 
@@ -286,5 +315,322 @@ describe('AuthService', () => {
     userService.createWithRole.mockRejectedValue(error);
 
     await expect(authService.register(registerDto)).rejects.toThrow(error);
+  });
+
+  describe('refresh', () => {
+    const activeUserAuthRecord: UserAuthRecord = {
+      ...userAuthRecord,
+      status: UserStatus.ACTIVE,
+    };
+
+    const setupValidRefresh = (refreshToken: string) => {
+      sessionRepository.findByRefreshTokenHash.mockResolvedValue({
+        ...activeSession,
+        refreshTokenHash: sha256hex(refreshToken),
+      });
+      sessionRepository.updateRefreshToken.mockImplementation(
+        (id: string, refreshTokenHash: string) =>
+          Promise.resolve({
+            ...activeSession,
+            id,
+            refreshTokenHash,
+          }),
+      );
+      userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+    };
+
+    it('rotates the refresh token and returns a new access token', async () => {
+      const oldRefreshToken =
+        'old-refresh-token-0123456789abcdef-0123456789abcdef';
+      setupValidRefresh(oldRefreshToken);
+
+      const result = await authService.refresh(oldRefreshToken);
+
+      expect(result.accessToken).toBe('signed-access-token');
+      expect(typeof result.refreshToken).toBe('string');
+      expect(result.refreshToken).not.toBe(oldRefreshToken);
+      expect(result.user).toEqual({
+        id: activeUserAuthRecord.id,
+        email: activeUserAuthRecord.email,
+        firstName: activeUserAuthRecord.firstName,
+        lastName: activeUserAuthRecord.lastName,
+        status: UserStatus.ACTIVE,
+        emailVerifiedAt: activeUserAuthRecord.emailVerifiedAt,
+        createdAt: activeUserAuthRecord.createdAt,
+        updatedAt: activeUserAuthRecord.updatedAt,
+      });
+      expect(sessionRepository.findByRefreshTokenHash).toHaveBeenCalledWith(
+        sha256hex(oldRefreshToken),
+      );
+      expect(sessionRepository.updateRefreshToken).toHaveBeenCalledWith(
+        activeSession.id,
+        sha256hex(result.refreshToken),
+      );
+      expect(tokenService.generateAccessToken).toHaveBeenCalledWith({
+        sub: activeUserAuthRecord.id,
+        sessionId: activeSession.id,
+        roles: ['USER'],
+      });
+    });
+
+    it('rejects an unknown refresh token', async () => {
+      sessionRepository.findByRefreshTokenHash.mockResolvedValue(null);
+
+      await expect(authService.refresh('unknown-token')).rejects.toThrow(
+        new UnauthorizedException('Invalid refresh token'),
+      );
+
+      expect(sessionRepository.updateRefreshToken).not.toHaveBeenCalled();
+      expect(tokenService.generateAccessToken).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing refresh token', async () => {
+      await expect(authService.refresh(undefined)).rejects.toThrow(
+        new UnauthorizedException('Invalid refresh token'),
+      );
+
+      expect(sessionRepository.findByRefreshTokenHash).not.toHaveBeenCalled();
+    });
+
+    it('rejects an expired session', async () => {
+      sessionRepository.findByRefreshTokenHash.mockResolvedValue({
+        ...activeSession,
+        expiresAt: new Date('2026-08-01T08:00:00.000Z'),
+      });
+
+      await expect(authService.refresh('expired-token')).rejects.toThrow(
+        new UnauthorizedException('Invalid refresh token'),
+      );
+
+      expect(sessionRepository.updateRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('rejects a revoked session', async () => {
+      sessionRepository.findByRefreshTokenHash.mockResolvedValue({
+        ...activeSession,
+        revokedAt: new Date('2026-08-15T09:00:00.000Z'),
+      });
+
+      await expect(authService.refresh('revoked-token')).rejects.toThrow(
+        new UnauthorizedException('Invalid refresh token'),
+      );
+
+      expect(sessionRepository.updateRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('rejects refresh when the user is no longer active', async () => {
+      setupValidRefresh('token-of-suspended-user');
+      userService.findAuthById.mockResolvedValue({
+        ...activeUserAuthRecord,
+        status: UserStatus.SUSPENDED,
+      });
+
+      await expect(
+        authService.refresh('token-of-suspended-user'),
+      ).rejects.toThrow(new UnauthorizedException('Invalid refresh token'));
+
+      expect(sessionRepository.updateRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('rejects refresh when the user no longer exists', async () => {
+      setupValidRefresh('token-of-deleted-user');
+      userService.findAuthById.mockResolvedValue(null);
+
+      await expect(
+        authService.refresh('token-of-deleted-user'),
+      ).rejects.toThrow(new UnauthorizedException('Invalid refresh token'));
+
+      expect(sessionRepository.updateRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('never returns passwordHash from refresh', async () => {
+      setupValidRefresh('some-valid-token');
+
+      const result = await authService.refresh('some-valid-token');
+
+      expect(result.user).not.toHaveProperty('passwordHash');
+      expect(result).not.toHaveProperty('passwordHash');
+    });
+  });
+
+  describe('validateAccess', () => {
+    const accessPayload = {
+      sub: 'user-1',
+      sessionId: 'session-1',
+      roles: ['USER'],
+    };
+
+    const setupValidAccess = () => {
+      tokenService.verifyAccessToken.mockReturnValue(accessPayload);
+      sessionRepository.findById.mockResolvedValue(activeSession);
+      userService.findAuthById.mockResolvedValue({
+        ...userAuthRecord,
+        status: UserStatus.ACTIVE,
+      });
+    };
+
+    it('returns the authenticated user for a valid token and session', async () => {
+      setupValidAccess();
+
+      const result = await authService.validateAccess('valid-token');
+
+      expect(result).toEqual({
+        id: 'user-1',
+        sessionId: 'session-1',
+        roles: ['USER'],
+        user: {
+          id: 'user-1',
+          email: userAuthRecord.email,
+          firstName: userAuthRecord.firstName,
+          lastName: userAuthRecord.lastName,
+          status: UserStatus.ACTIVE,
+          emailVerifiedAt: userAuthRecord.emailVerifiedAt,
+          createdAt: userAuthRecord.createdAt,
+          updatedAt: userAuthRecord.updatedAt,
+        },
+      });
+      expect(tokenService.verifyAccessToken).toHaveBeenCalledWith(
+        'valid-token',
+      );
+      expect(sessionRepository.findById).toHaveBeenCalledWith('session-1');
+    });
+
+    it('rejects when token verification fails', async () => {
+      tokenService.verifyAccessToken.mockImplementation(() => {
+        throw new UnauthorizedException('Invalid access token');
+      });
+
+      await expect(authService.validateAccess('bad-token')).rejects.toThrow(
+        new UnauthorizedException('Invalid access token'),
+      );
+
+      expect(sessionRepository.findById).not.toHaveBeenCalled();
+    });
+
+    it('rejects a token without a session id', async () => {
+      tokenService.verifyAccessToken.mockReturnValue({
+        sub: 'user-1',
+        roles: ['USER'],
+      });
+
+      await expect(
+        authService.validateAccess('sessionless-token'),
+      ).rejects.toThrow(new UnauthorizedException('Invalid access token'));
+
+      expect(sessionRepository.findById).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the session does not exist', async () => {
+      tokenService.verifyAccessToken.mockReturnValue(accessPayload);
+      sessionRepository.findById.mockResolvedValue(null);
+
+      await expect(authService.validateAccess('valid-token')).rejects.toThrow(
+        new UnauthorizedException('Invalid access token'),
+      );
+    });
+
+    it('rejects a revoked session', async () => {
+      tokenService.verifyAccessToken.mockReturnValue(accessPayload);
+      sessionRepository.findById.mockResolvedValue({
+        ...activeSession,
+        revokedAt: new Date('2026-08-15T09:00:00.000Z'),
+      });
+
+      await expect(authService.validateAccess('valid-token')).rejects.toThrow(
+        new UnauthorizedException('Invalid access token'),
+      );
+    });
+
+    it('rejects an expired session', async () => {
+      tokenService.verifyAccessToken.mockReturnValue(accessPayload);
+      sessionRepository.findById.mockResolvedValue({
+        ...activeSession,
+        expiresAt: new Date('2026-08-01T08:00:00.000Z'),
+      });
+
+      await expect(authService.validateAccess('valid-token')).rejects.toThrow(
+        new UnauthorizedException('Invalid access token'),
+      );
+    });
+
+    it('rejects when the token subject does not match the session user', async () => {
+      tokenService.verifyAccessToken.mockReturnValue(accessPayload);
+      sessionRepository.findById.mockResolvedValue({
+        ...activeSession,
+        userId: 'other-user',
+      });
+      userService.findAuthById.mockResolvedValue({
+        ...userAuthRecord,
+        status: UserStatus.ACTIVE,
+      });
+
+      await expect(authService.validateAccess('valid-token')).rejects.toThrow(
+        new UnauthorizedException('Invalid access token'),
+      );
+    });
+
+    it('rejects when the user is no longer active', async () => {
+      tokenService.verifyAccessToken.mockReturnValue(accessPayload);
+      sessionRepository.findById.mockResolvedValue(activeSession);
+      userService.findAuthById.mockResolvedValue({
+        ...userAuthRecord,
+        status: UserStatus.SUSPENDED,
+      });
+
+      await expect(authService.validateAccess('valid-token')).rejects.toThrow(
+        new UnauthorizedException('Invalid access token'),
+      );
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes the session matching the refresh cookie', async () => {
+      sessionRepository.findByRefreshTokenHash.mockResolvedValue(activeSession);
+      sessionRepository.revoke.mockResolvedValue({
+        ...activeSession,
+        revokedAt: new Date('2026-08-15T10:00:00.000Z'),
+      });
+
+      await authService.logout('current-refresh-token');
+
+      expect(sessionRepository.findByRefreshTokenHash).toHaveBeenCalledWith(
+        sha256hex('current-refresh-token'),
+      );
+      expect(sessionRepository.revoke).toHaveBeenCalledWith(activeSession.id);
+    });
+
+    it('is idempotent when the cookie is missing or unknown', async () => {
+      sessionRepository.findByRefreshTokenHash.mockResolvedValue(null);
+
+      await expect(authService.logout(undefined)).resolves.toBeUndefined();
+      await expect(
+        authService.logout('unknown-token'),
+      ).resolves.toBeUndefined();
+
+      expect(sessionRepository.revoke).not.toHaveBeenCalled();
+    });
+
+    it('does not revoke an already revoked session again', async () => {
+      sessionRepository.findByRefreshTokenHash.mockResolvedValue({
+        ...activeSession,
+        revokedAt: new Date('2026-08-15T09:00:00.000Z'),
+      });
+
+      await expect(
+        authService.logout('already-revoked-token'),
+      ).resolves.toBeUndefined();
+
+      expect(sessionRepository.revoke).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('logoutAll', () => {
+    it('revokes all active sessions of the user and returns the count', async () => {
+      sessionRepository.revokeAllForUser.mockResolvedValue(3);
+
+      await expect(authService.logoutAll('user-1')).resolves.toBe(3);
+
+      expect(sessionRepository.revokeAllForUser).toHaveBeenCalledWith('user-1');
+    });
   });
 });

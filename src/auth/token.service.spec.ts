@@ -1,14 +1,15 @@
+import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { TokenService } from './token.service';
 
 describe('TokenService', () => {
-  let jwtService: { sign: jest.Mock };
+  let jwtService: { sign: jest.Mock; verify: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
   let tokenService: TokenService;
 
   beforeEach(() => {
-    jwtService = { sign: jest.fn() };
+    jwtService = { sign: jest.fn(), verify: jest.fn() };
     configService = { getOrThrow: jest.fn() };
     configService.getOrThrow.mockImplementation((key: string) => {
       if (key === 'app.jwtAccessExpiresIn') {
@@ -60,6 +61,28 @@ describe('TokenService', () => {
         roles: ['USER', 'MODERATOR'],
       },
       { expiresIn: '15m' },
+    );
+  });
+
+  it('verifies a valid access token and returns its payload', () => {
+    const payload = {
+      sub: 'user-123',
+      sessionId: 'session-456',
+      roles: ['USER'],
+    };
+    jwtService.verify.mockReturnValue(payload);
+
+    expect(tokenService.verifyAccessToken('valid-token')).toEqual(payload);
+    expect(jwtService.verify).toHaveBeenCalledWith('valid-token');
+  });
+
+  it('throws unauthorized when verification fails', () => {
+    jwtService.verify.mockImplementation(() => {
+      throw new Error('invalid signature');
+    });
+
+    expect(() => tokenService.verifyAccessToken('bad-token')).toThrow(
+      new UnauthorizedException('Invalid access token'),
     );
   });
 });

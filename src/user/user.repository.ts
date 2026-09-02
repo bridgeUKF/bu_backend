@@ -71,6 +71,13 @@ export class UserRepository {
     });
   }
 
+  findAuthById(id: string): Promise<UserAuthRecord | null> {
+    return this.prismaService.user.findUnique({
+      where: { id },
+      select: userAuthSelect,
+    });
+  }
+
   create(data: CreateUserRepositoryData): Promise<UserRecord> {
     return this.prismaService.user.create({
       data: {

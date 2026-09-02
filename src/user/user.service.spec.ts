@@ -27,6 +27,7 @@ describe('UserService', () => {
     userRepository = {
       findById: jest.fn(),
       findByEmail: jest.fn(),
+      findAuthById: jest.fn(),
       create: jest.fn(),
       createWithRole: jest.fn(),
     } as unknown as jest.Mocked<UserRepository>;
@@ -60,6 +61,20 @@ describe('UserService', () => {
     await expect(
       userService.findByEmail('missing@example.com'),
     ).resolves.toBeNull();
+  });
+
+  it('findAuthById returns the repository result', async () => {
+    userRepository.findAuthById.mockResolvedValue(userAuthRecord);
+
+    await expect(userService.findAuthById('user-1')).resolves.toEqual(
+      userAuthRecord,
+    );
+  });
+
+  it('findAuthById returns null when repository returns null', async () => {
+    userRepository.findAuthById.mockResolvedValue(null);
+
+    await expect(userService.findAuthById('missing-user')).resolves.toBeNull();
   });
 
   it('create delegates creation to the repository', async () => {
