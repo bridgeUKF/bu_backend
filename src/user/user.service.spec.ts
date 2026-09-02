@@ -28,6 +28,8 @@ describe('UserService', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       findAuthById: jest.fn(),
+      findByVerificationTokenHash: jest.fn(),
+      activate: jest.fn(),
       create: jest.fn(),
       createWithRole: jest.fn(),
     } as unknown as jest.Mocked<UserRepository>;
@@ -75,6 +77,30 @@ describe('UserService', () => {
     userRepository.findAuthById.mockResolvedValue(null);
 
     await expect(userService.findAuthById('missing-user')).resolves.toBeNull();
+  });
+
+  it('findByVerificationTokenHash delegates to the repository', async () => {
+    const verificationRecord = {
+      id: 'user-1',
+      email: 'user@example.com',
+      status: UserStatus.PENDING,
+      emailVerificationTokenHash: 'token-hash',
+      emailVerificationExpiresAt: new Date('2026-09-03T08:00:00.000Z'),
+    };
+    userRepository.findByVerificationTokenHash.mockResolvedValue(
+      verificationRecord,
+    );
+
+    await expect(
+      userService.findByVerificationTokenHash('token-hash'),
+    ).resolves.toEqual(verificationRecord);
+  });
+
+  it('activate delegates activation to the repository', async () => {
+    userRepository.activate.mockResolvedValue(userRecord);
+
+    await expect(userService.activate('user-1')).resolves.toEqual(userRecord);
+    expect(userRepository.activate.mock.calls).toEqual([['user-1']]);
   });
 
   it('create delegates creation to the repository', async () => {

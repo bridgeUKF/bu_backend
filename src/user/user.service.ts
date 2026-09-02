@@ -6,9 +6,14 @@ import {
   UserAuthRecord,
   UserRecord,
   UserRepository,
+  UserVerificationRecord,
 } from './user.repository';
 
-export type { UserAuthRecord, UserRecord } from './user.repository';
+export type {
+  UserAuthRecord,
+  UserRecord,
+  UserVerificationRecord,
+} from './user.repository';
 
 export type CreateUserData = {
   email: string;
@@ -17,6 +22,8 @@ export type CreateUserData = {
   lastName: string;
   status?: UserStatus;
   emailVerifiedAt?: Date | null;
+  emailVerificationTokenHash?: string | null;
+  emailVerificationExpiresAt?: Date | null;
 };
 
 @Injectable()
@@ -35,6 +42,16 @@ export class UserService {
     return this.userRepository.findAuthById(id);
   }
 
+  findByVerificationTokenHash(
+    tokenHash: string,
+  ): Promise<UserVerificationRecord | null> {
+    return this.userRepository.findByVerificationTokenHash(tokenHash);
+  }
+
+  activate(id: string): Promise<UserRecord> {
+    return this.userRepository.activate(id);
+  }
+
   create(data: CreateUserData): Promise<UserRecord> {
     const createUserData: CreateUserRepositoryData = {
       email: data.email,
@@ -43,6 +60,8 @@ export class UserService {
       lastName: data.lastName,
       status: data.status,
       emailVerifiedAt: data.emailVerifiedAt,
+      emailVerificationTokenHash: data.emailVerificationTokenHash,
+      emailVerificationExpiresAt: data.emailVerificationExpiresAt,
     };
 
     return this.userRepository.create(createUserData);
@@ -59,6 +78,8 @@ export class UserService {
       lastName: data.lastName,
       status: data.status,
       emailVerifiedAt: data.emailVerifiedAt,
+      emailVerificationTokenHash: data.emailVerificationTokenHash,
+      emailVerificationExpiresAt: data.emailVerificationExpiresAt,
     };
 
     return this.userRepository.createWithRole(createUserData, roleName);

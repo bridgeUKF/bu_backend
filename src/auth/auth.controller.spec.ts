@@ -221,4 +221,77 @@ describe('AuthController', () => {
       });
     });
   });
+
+  describe('register', () => {
+    const registerResult = {
+      user: loginResult.user,
+      verificationToken: 'verify-token-123',
+    };
+
+    it('exposes the verification token outside production', async () => {
+      const authService = {
+        register: jest.fn().mockResolvedValue(registerResult),
+      };
+      const configService = {
+        get: jest.fn().mockReturnValue('development'),
+      };
+      const controller = new AuthController(
+        authService as unknown as AuthService,
+        configService as unknown as ConfigService,
+      );
+
+      await expect(
+        controller.register({
+          email: 'new@example.com',
+          password: 'secret123',
+          firstName: 'Grace',
+          lastName: 'Hopper',
+        }),
+      ).resolves.toEqual({
+        ...registerResult.user,
+        verificationToken: registerResult.verificationToken,
+      });
+    });
+
+    it('hides the verification token in production', async () => {
+      const authService = {
+        register: jest.fn().mockResolvedValue(registerResult),
+      };
+      const configService = {
+        get: jest.fn().mockReturnValue('production'),
+      };
+      const controller = new AuthController(
+        authService as unknown as AuthService,
+        configService as unknown as ConfigService,
+      );
+
+      const response = await controller.register({
+        email: 'new@example.com',
+        password: 'secret123',
+        firstName: 'Grace',
+        lastName: 'Hopper',
+      });
+
+      expect(response).toEqual(registerResult.user);
+      expect(response).not.toHaveProperty('verificationToken');
+    });
+  });
+
+  describe('verifyEmail', () => {
+    it('delegates verification to the service', async () => {
+      const authService = {
+        verifyEmail: jest.fn().mockResolvedValue(loginResult.user),
+      };
+      const controller = new AuthController(
+        authService as unknown as AuthService,
+        {} as unknown as ConfigService,
+      );
+
+      await expect(
+        controller.verifyEmail({ token: 'incoming-token' }),
+      ).resolves.toEqual(loginResult.user);
+
+      expect(authService.verifyEmail).toHaveBeenCalledWith('incoming-token');
+    });
+  });
 });

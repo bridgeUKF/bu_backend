@@ -16,6 +16,7 @@ import type { AuthenticatedUser } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Controller({
@@ -30,8 +31,21 @@ export class AuthController {
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  register(@Body() registerDto: RegisterDto) {
-    return this.authService.register(registerDto);
+  async register(@Body() registerDto: RegisterDto) {
+    const { user, verificationToken } =
+      await this.authService.register(registerDto);
+
+    if (this.configService.get<string>('app.nodeEnv') === 'production') {
+      return user;
+    }
+
+    return { ...user, verificationToken };
+  }
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
+    return this.authService.verifyEmail(verifyEmailDto.token);
   }
 
   @Post('login')

@@ -27,12 +27,24 @@ const userAuthSelect = {
   },
 } satisfies Prisma.UserSelect;
 
+const userVerificationSelect = {
+  id: true,
+  email: true,
+  status: true,
+  emailVerificationTokenHash: true,
+  emailVerificationExpiresAt: true,
+} satisfies Prisma.UserSelect;
+
 export type UserRecord = Prisma.UserGetPayload<{
   select: typeof userPublicSelect;
 }>;
 
 export type UserAuthRecord = Prisma.UserGetPayload<{
   select: typeof userAuthSelect;
+}>;
+
+export type UserVerificationRecord = Prisma.UserGetPayload<{
+  select: typeof userVerificationSelect;
 }>;
 
 export type CreateUserRepositoryData = {
@@ -42,6 +54,8 @@ export type CreateUserRepositoryData = {
   lastName: string;
   status?: UserStatus;
   emailVerifiedAt?: Date | null;
+  emailVerificationTokenHash?: string | null;
+  emailVerificationExpiresAt?: Date | null;
 };
 
 export type RoleName = 'USER' | 'MODERATOR' | 'ADMIN';
@@ -78,6 +92,28 @@ export class UserRepository {
     });
   }
 
+  findByVerificationTokenHash(
+    tokenHash: string,
+  ): Promise<UserVerificationRecord | null> {
+    return this.prismaService.user.findUnique({
+      where: { emailVerificationTokenHash: tokenHash },
+      select: userVerificationSelect,
+    });
+  }
+
+  activate(id: string): Promise<UserRecord> {
+    return this.prismaService.user.update({
+      where: { id },
+      data: {
+        status: UserStatus.ACTIVE,
+        emailVerifiedAt: new Date(),
+        emailVerificationTokenHash: null,
+        emailVerificationExpiresAt: null,
+      },
+      select: userPublicSelect,
+    });
+  }
+
   create(data: CreateUserRepositoryData): Promise<UserRecord> {
     return this.prismaService.user.create({
       data: {
@@ -87,6 +123,8 @@ export class UserRepository {
         lastName: data.lastName,
         status: data.status,
         emailVerifiedAt: data.emailVerifiedAt,
+        emailVerificationTokenHash: data.emailVerificationTokenHash,
+        emailVerificationExpiresAt: data.emailVerificationExpiresAt,
       },
       select: userPublicSelect,
     });
@@ -105,6 +143,8 @@ export class UserRepository {
           lastName: data.lastName,
           status: data.status,
           emailVerifiedAt: data.emailVerifiedAt,
+          emailVerificationTokenHash: data.emailVerificationTokenHash,
+          emailVerificationExpiresAt: data.emailVerificationExpiresAt,
         },
         select: userPublicSelect,
       });

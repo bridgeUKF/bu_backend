@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   UnauthorizedException,
@@ -18,6 +19,11 @@ export type LoginResponse = {
   user: UserRecord;
 };
 
+export type RegisterResponse = {
+  user: UserRecord;
+  verificationToken: string;
+};
+
 export type AuthenticatedUser = {
   id: string;
   sessionId: string;
@@ -31,7 +37,8 @@ export class AuthService {
     'Invalid email or password';
   private static readonly invalidRefreshTokenMessage = 'Invalid refresh token';
   private static readonly invalidAccessTokenMessage = 'Invalid access token';
-
+  private static readonly invalidVerificationTokenMessage =
+    'Invalid or expired verification token';
   constructor(
     private readonly userService: UserService,
     private readonly tokenService: TokenService,
@@ -55,7 +62,7 @@ export class AuthService {
     }
 
     const refreshToken = this.generateRefreshToken();
-    const refreshTokenHash = this.hashRefreshToken(refreshToken);
+    const refreshTokenHash = this.hashToken(refreshToken);
     const session = await this.sessionRepository.create({
       userId: user.id,
       refreshTokenHash,
@@ -82,7 +89,7 @@ export class AuthService {
     }
 
     const session = await this.sessionRepository.findByRefreshTokenHash(
-      this.hashRefreshToken(refreshToken),
+      this.hashToken(refreshToken),
     );
 
     if (
@@ -102,7 +109,7 @@ export class AuthService {
     const nextRefreshToken = this.generateRefreshToken();
     const updatedSession = await this.sessionRepository.updateRefreshToken(
       session.id,
-      this.hashRefreshToken(nextRefreshToken),
+      this.hashToken(nextRefreshToken),
     );
 
     const accessToken = this.tokenService.generateAccessToken({
@@ -156,7 +163,7 @@ export class AuthService {
     }
 
     const session = await this.sessionRepository.findByRefreshTokenHash(
-      this.hashRefreshToken(refreshToken),
+      this.hashToken(refreshToken),
     );
 
     if (!session || session.revokedAt) {
@@ -170,7 +177,7 @@ export class AuthService {
     return this.sessionRepository.revokeAllForUser(userId);
   }
 
-  async register(registerDto: RegisterDto): Promise<UserRecord> {
+  async register(registerDto: RegisterDto): Promise<RegisterResponse> {
     const existingUser = await this.userService.findByEmail(registerDto.email);
 
     if (existingUser) {
@@ -178,9 +185,10 @@ export class AuthService {
     }
 
     const passwordHash = await argon2.hash(registerDto.password);
+    const verificationToken = this.generateVerificationToken();
 
     try {
-      return await this.userService.createWithRole(
+      const user = await this.userService.createWithRole(
         {
           email: registerDto.email,
           passwordHash,
@@ -188,9 +196,15 @@ export class AuthService {
           lastName: registerDto.lastName,
           status: UserStatus.PENDING,
           emailVerifiedAt: null,
+          emailVerificationTokenHash: this.hashToken(verificationToken),
+          emailVerificationExpiresAt: new Date(
+            Date.now() + 24 * 60 * 60 * 1000,
+          ),
         },
         'USER',
       );
+
+      return { user, verificationToken };
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -203,12 +217,41 @@ export class AuthService {
     }
   }
 
+  async verifyEmail(token: string | undefined): Promise<UserRecord> {
+    if (!token) {
+      throw new BadRequestException(
+        AuthService.invalidVerificationTokenMessage,
+      );
+    }
+
+    const record = await this.userService.findByVerificationTokenHash(
+      this.hashToken(token),
+    );
+
+    if (
+      !record ||
+      record.status !== UserStatus.PENDING ||
+      !record.emailVerificationExpiresAt ||
+      record.emailVerificationExpiresAt.getTime() <= Date.now()
+    ) {
+      throw new BadRequestException(
+        AuthService.invalidVerificationTokenMessage,
+      );
+    }
+
+    return this.userService.activate(record.id);
+  }
+
   private generateRefreshToken(): string {
     return randomBytes(32).toString('hex');
   }
 
-  private hashRefreshToken(refreshToken: string): string {
-    return createHash('sha256').update(refreshToken).digest('hex');
+  private generateVerificationToken(): string {
+    return randomBytes(32).toString('hex');
+  }
+
+  private hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 
   private canAuthenticate(status: UserStatus): boolean {

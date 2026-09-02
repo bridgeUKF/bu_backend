@@ -1,4 +1,8 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Prisma, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { createHash } from 'crypto';
@@ -81,6 +85,8 @@ describe('AuthService', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       findAuthById: jest.fn(),
+      findByVerificationTokenHash: jest.fn(),
+      activate: jest.fn(),
       create: jest.fn(),
       createWithRole: jest.fn(),
     } as unknown as jest.Mocked<UserService>;
@@ -249,25 +255,34 @@ describe('AuthService', () => {
     hashMock.mockResolvedValue('hashed-password');
     userService.createWithRole.mockResolvedValue(userRecord);
 
-    await expect(authService.register(registerDto)).resolves.toEqual(
-      userRecord,
-    );
+    const result = await authService.register(registerDto);
+
+    expect(result.user).toEqual(userRecord);
+    expect(typeof result.verificationToken).toBe('string');
+    expect(result.verificationToken).toHaveLength(64);
 
     expect(userService.findByEmail.mock.calls).toEqual([[registerDto.email]]);
     expect(hashMock.mock.calls).toEqual([[registerDto.password]]);
-    expect(userService.createWithRole.mock.calls).toEqual([
-      [
-        {
-          email: registerDto.email,
-          passwordHash: 'hashed-password',
-          firstName: registerDto.firstName,
-          lastName: registerDto.lastName,
-          status: UserStatus.PENDING,
-          emailVerifiedAt: null,
-        },
-        'USER',
-      ],
-    ]);
+    const createCalls = userService.createWithRole.mock.calls;
+    expect(createCalls).toHaveLength(1);
+    const [createData, roleName] = createCalls[0];
+    expect(roleName).toBe('USER');
+    expect(createData).toMatchObject({
+      email: registerDto.email,
+      passwordHash: 'hashed-password',
+      firstName: registerDto.firstName,
+      lastName: registerDto.lastName,
+      status: UserStatus.PENDING,
+      emailVerifiedAt: null,
+      emailVerificationTokenHash: sha256hex(result.verificationToken),
+    });
+    expect(
+      (
+        createData as unknown as {
+          emailVerificationExpiresAt?: unknown;
+        }
+      ).emailVerificationExpiresAt,
+    ).toBeInstanceOf(Date);
   });
 
   it('throws a conflict exception when the email already exists', async () => {
@@ -631,6 +646,88 @@ describe('AuthService', () => {
       await expect(authService.logoutAll('user-1')).resolves.toBe(3);
 
       expect(sessionRepository.revokeAllForUser).toHaveBeenCalledWith('user-1');
+    });
+  });
+
+  describe('verifyEmail', () => {
+    const verificationRecord = {
+      id: 'user-1',
+      email: registerDto.email,
+      status: UserStatus.PENDING,
+      emailVerificationTokenHash: 'stored-token-hash',
+      emailVerificationExpiresAt: new Date('2026-09-03T08:00:00.000Z'),
+    };
+
+    const setupValidToken = (token: string) => {
+      userService.findByVerificationTokenHash.mockResolvedValue({
+        ...verificationRecord,
+        emailVerificationTokenHash: sha256hex(token),
+      });
+      userService.activate.mockResolvedValue({
+        ...userRecord,
+        status: UserStatus.ACTIVE,
+        emailVerifiedAt: new Date('2026-09-02T22:00:00.000Z'),
+      });
+    };
+
+    it('activates a pending user with a valid token', async () => {
+      setupValidToken('valid-verify-token');
+
+      const result = await authService.verifyEmail('valid-verify-token');
+
+      expect(result.status).toBe(UserStatus.ACTIVE);
+      expect(result.emailVerifiedAt).toBeInstanceOf(Date);
+      expect(result).not.toHaveProperty('passwordHash');
+      expect(userService.findByVerificationTokenHash.mock.calls).toEqual([
+        [sha256hex('valid-verify-token')],
+      ]);
+      expect(userService.activate.mock.calls).toEqual([['user-1']]);
+    });
+
+    it('rejects a missing token', async () => {
+      await expect(authService.verifyEmail(undefined)).rejects.toThrow(
+        new BadRequestException('Invalid or expired verification token'),
+      );
+
+      expect(userService.findByVerificationTokenHash.mock.calls).toHaveLength(
+        0,
+      );
+    });
+
+    it('rejects an unknown token', async () => {
+      userService.findByVerificationTokenHash.mockResolvedValue(null);
+
+      await expect(authService.verifyEmail('unknown-token')).rejects.toThrow(
+        new BadRequestException('Invalid or expired verification token'),
+      );
+
+      expect(userService.activate.mock.calls).toHaveLength(0);
+    });
+
+    it('rejects an expired token', async () => {
+      userService.findByVerificationTokenHash.mockResolvedValue({
+        ...verificationRecord,
+        emailVerificationExpiresAt: new Date('2026-08-01T08:00:00.000Z'),
+      });
+
+      await expect(authService.verifyEmail('expired-token')).rejects.toThrow(
+        new BadRequestException('Invalid or expired verification token'),
+      );
+
+      expect(userService.activate.mock.calls).toHaveLength(0);
+    });
+
+    it('rejects a token for an already active user', async () => {
+      userService.findByVerificationTokenHash.mockResolvedValue({
+        ...verificationRecord,
+        status: UserStatus.ACTIVE,
+      });
+
+      await expect(authService.verifyEmail('used-token')).rejects.toThrow(
+        new BadRequestException('Invalid or expired verification token'),
+      );
+
+      expect(userService.activate.mock.calls).toHaveLength(0);
     });
   });
 });

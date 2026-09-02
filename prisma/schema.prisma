@@ -14,17 +14,19 @@ enum UserStatus {
 }
 
 model User {
-  id              String     @id @default(uuid())
-  email           String     @unique
-  passwordHash    String
-  firstName       String
-  lastName        String
-  status          UserStatus @default(PENDING)
-  emailVerifiedAt DateTime?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  roles           UserRole[]
-  sessions        Session[]
+  id                          String     @id @default(uuid())
+  email                       String     @unique
+  passwordHash                String
+  firstName                   String
+  lastName                    String
+  status                      UserStatus @default(PENDING)
+  emailVerifiedAt             DateTime?
+  emailVerificationTokenHash  String?    @unique
+  emailVerificationExpiresAt  DateTime?
+  createdAt                   DateTime   @default(now())
+  updatedAt                   DateTime   @updatedAt
+  roles                       UserRole[]
+  sessions                    Session[]
 }
 
 model Role {

@@ -67,6 +67,8 @@ describe('App (e2e)', () => {
       findById: jest.fn(),
       findByEmail: jest.fn(),
       findAuthById: jest.fn(),
+      findByVerificationTokenHash: jest.fn(),
+      activate: jest.fn(),
       create: jest.fn(),
       createWithRole: jest.fn(),
     } as unknown as jest.Mocked<UserService>;
@@ -188,6 +190,100 @@ describe('App (e2e)', () => {
       emailVerifiedAt: null,
     });
     expect(response.json()).not.toHaveProperty('passwordHash');
+  });
+
+  it('/api/v1/auth/register (POST) returns a verification token', async () => {
+    userService.findByEmail.mockResolvedValue(null);
+    userService.createWithRole.mockResolvedValue(userRecord);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'new@example.com',
+        password: 'secret123',
+        firstName: 'Grace',
+        lastName: 'Hopper',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const registerBody: unknown = response.json();
+    expect(registerBody).toMatchObject({
+      verificationToken: expect.any(String) as unknown,
+    });
+    const verificationToken = (registerBody as { verificationToken?: unknown })
+      .verificationToken;
+    expect(typeof verificationToken).toBe('string');
+    expect(verificationToken as string).toHaveLength(64);
+  });
+
+  it('/api/v1/auth/verify-email (POST) activates the user', async () => {
+    const activatedUser = {
+      ...userRecord,
+      status: UserStatus.ACTIVE,
+      emailVerifiedAt: new Date('2026-09-03T08:00:00.000Z').toISOString(),
+    };
+    userService.findByVerificationTokenHash.mockResolvedValue({
+      id: 'user-1',
+      email: userRecord.email,
+      status: UserStatus.PENDING,
+      emailVerificationTokenHash: 'stored-hash',
+      emailVerificationExpiresAt: new Date('2026-09-04T08:00:00.000Z'),
+    });
+    userService.activate.mockResolvedValue({
+      ...userRecord,
+      status: UserStatus.ACTIVE,
+      emailVerifiedAt: new Date('2026-09-03T08:00:00.000Z'),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/verify-email',
+      payload: { token: 'valid-verify-token' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const verifyBody: unknown = response.json();
+    expect(verifyBody).toMatchObject({
+      id: userRecord.id,
+      email: userRecord.email,
+      status: UserStatus.ACTIVE,
+    });
+    const emailVerifiedAt = (verifyBody as { emailVerifiedAt?: unknown })
+      .emailVerifiedAt;
+    expect(emailVerifiedAt).toBe(activatedUser.emailVerifiedAt);
+    expect(response.json()).not.toHaveProperty('passwordHash');
+    expect(userService.activate.mock.calls).toEqual([['user-1']]);
+  });
+
+  it('/api/v1/auth/verify-email (POST) rejects an unknown token', async () => {
+    userService.findByVerificationTokenHash.mockResolvedValue(null);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/verify-email',
+      payload: { token: 'unknown-token' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      statusCode: 400,
+      message: 'Invalid or expired verification token',
+      error: 'Bad Request',
+    });
+    expect(userService.activate.mock.calls).toHaveLength(0);
+  });
+
+  it('/api/v1/auth/verify-email (POST) rejects invalid request bodies', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/verify-email',
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(userService.activate.mock.calls).toHaveLength(0);
   });
 
   it('/api/v1/auth/register (POST) rejects duplicate email', async () => {
