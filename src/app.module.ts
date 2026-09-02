@@ -9,6 +9,7 @@ import { DatabaseModule } from './infrastructure/database/database.module';
 import { RedisModule } from './infrastructure/redis/redis.module';
 import { ContentModule } from './content/content.module';
 import { ProfileModule } from './profile/profile.module';
+import { ReportModule } from './report/report.module';
 import { UserModule } from './user/user.module';
 
 @Module({
@@ -51,6 +52,7 @@ import { UserModule } from './user/user.module';
     HealthModule,
     ContentModule,
     ProfileModule,
+    ReportModule,
     UserModule,
   ],
 })

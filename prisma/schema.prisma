@@ -30,6 +30,20 @@ enum ReactionValue {
   DISLIKE
 }
 
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  MISINFORMATION
+  COPYRIGHT
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
 model User {
   id              String     @id @default(uuid())
   email           String     @unique
@@ -48,6 +62,7 @@ model User {
   contents        ContentItem[]
   favorites       Favorite[]
   reactions       ContentReaction[]
+  reports         Report[]
 }
 
 model Role {
@@ -114,6 +129,7 @@ model ContentItem {
   author       User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
   favorites    Favorite[]
   reactions    ContentReaction[]
+  reports      Report[]
 
   @@index([authorId])
   @@index([status, createdAt])
@@ -129,6 +145,23 @@ model Favorite {
 
   @@unique([userId, contentId])
   @@index([contentId])
+}
+
+model Report {
+  id         String       @id @default(uuid())
+  reporterId String
+  contentId  String
+  reason     ReportReason
+  details    String?
+  status     ReportStatus @default(PENDING)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  reporter   User         @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  content    ContentItem  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@unique([reporterId, contentId])
+  @@index([contentId])
+  @@index([status, createdAt])
 }
 
 model ContentReaction {

@@ -20,6 +20,7 @@ import { RedisHealthService } from './../src/infrastructure/redis/redis-health.s
 import { SessionRepository } from './../src/auth/session.repository';
 import { TokenService } from './../src/auth/token.service';
 import { ContentService } from './../src/content/content.service';
+import { ReportService } from './../src/report/report.service';
 import { ProfileService } from './../src/profile/profile.service';
 import { type UserAuthRecord, UserService } from './../src/user/user.service';
 
@@ -55,6 +56,11 @@ describe('App (e2e)', () => {
     listFavorites: jest.Mock;
     setReaction: jest.Mock;
     removeReaction: jest.Mock;
+  };
+  let reportService: {
+    report: jest.Mock;
+    listReports: jest.Mock;
+    handleReport: jest.Mock;
   };
   let activeUserAuthRecord: UserAuthRecord;
   let pendingUserAuthRecord: UserAuthRecord;
@@ -141,6 +147,12 @@ describe('App (e2e)', () => {
       removeReaction: jest.fn(),
     };
 
+    reportService = {
+      report: jest.fn(),
+      listReports: jest.fn(),
+      handleReport: jest.fn(),
+    };
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -171,6 +183,8 @@ describe('App (e2e)', () => {
       .useValue(profileService)
       .overrideProvider(ContentService)
       .useValue(contentService)
+      .overrideProvider(ReportService)
+      .useValue(reportService)
       .compile();
 
     app = moduleFixture.createNestApplication<NestFastifyApplication>(
@@ -1203,6 +1217,127 @@ describe('App (e2e)', () => {
       expect(contentService.removeReaction.mock.calls).toEqual([
         ['user-1', 'content-1'],
       ]);
+    });
+  });
+
+  describe('reports', () => {
+    const reportRecord = {
+      id: 'report-1',
+      reporterId: 'user-1',
+      contentId: 'content-1',
+      reason: 'SPAM',
+      details: null,
+      status: 'PENDING',
+      createdAt: new Date('2026-09-03T08:00:00.000Z'),
+      updatedAt: new Date('2026-09-03T08:00:00.000Z'),
+    };
+
+    const mockValidAccess = () => {
+      tokenService.verifyAccessToken.mockReturnValue({
+        sub: 'user-1',
+        sessionId: 'session-1',
+        roles: ['USER'],
+      });
+      sessionRepository.findById.mockResolvedValue({
+        id: 'session-1',
+        userId: 'user-1',
+        refreshTokenHash: 'stored-hash',
+        expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+        createdAt: new Date('2026-08-11T08:00:00.000Z'),
+        updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+        lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+        revokedAt: null,
+      });
+      userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+    };
+
+    it('/api/v1/reports (POST) files a complaint', async () => {
+      mockValidAccess();
+      reportService.report.mockResolvedValue(reportRecord);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/reports',
+        headers: { authorization: 'Bearer valid-access-token' },
+        payload: {
+          contentId: '123e4567-e89b-12d3-a456-426614174000',
+          reason: 'SPAM',
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toMatchObject({
+        id: 'report-1',
+        status: 'PENDING',
+      });
+      expect(reportService.report.mock.calls).toHaveLength(1);
+      expect(reportService.report.mock.calls).toEqual([
+        [
+          expect.anything(),
+          '123e4567-e89b-12d3-a456-426614174000',
+          { reason: 'SPAM' },
+        ],
+      ]);
+    });
+
+    it('/api/v1/reports (POST) rejects an invalid reason', async () => {
+      mockValidAccess();
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/reports',
+        headers: { authorization: 'Bearer valid-access-token' },
+        payload: { contentId: 'content-1', reason: 'DISLIKE' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(reportService.report.mock.calls).toHaveLength(0);
+    });
+
+    it('/api/v1/reports (GET) returns the queue', async () => {
+      mockValidAccess();
+      reportService.listReports.mockResolvedValue({
+        items: [reportRecord],
+        total: 1,
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/reports?limit=20&offset=0',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ total: 1 });
+    });
+
+    it('/api/v1/reports/:id (PATCH) handles a complaint', async () => {
+      mockValidAccess();
+      reportService.handleReport.mockResolvedValue({
+        ...reportRecord,
+        status: 'RESOLVED',
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/reports/report-1',
+        headers: { authorization: 'Bearer valid-access-token' },
+        payload: { status: 'RESOLVED' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ status: 'RESOLVED' });
+    });
+
+    it('/api/v1/reports (POST) rejects unauthenticated requests', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/reports',
+        payload: { contentId: 'content-1', reason: 'SPAM' },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(reportService.report.mock.calls).toHaveLength(0);
     });
   });
 
