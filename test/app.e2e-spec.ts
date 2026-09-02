@@ -1,5 +1,9 @@
 import cookie from '@fastify/cookie';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import {
+  NotFoundException,
+  ValidationPipe,
+  VersioningType,
+} from '@nestjs/common';
 import { UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -15,6 +19,7 @@ import { PrismaService } from './../src/infrastructure/database/prisma.service';
 import { RedisHealthService } from './../src/infrastructure/redis/redis-health.service';
 import { SessionRepository } from './../src/auth/session.repository';
 import { TokenService } from './../src/auth/token.service';
+import { ContentService } from './../src/content/content.service';
 import { ProfileService } from './../src/profile/profile.service';
 import { type UserAuthRecord, UserService } from './../src/user/user.service';
 
@@ -36,6 +41,14 @@ describe('App (e2e)', () => {
   let profileService: {
     getByUserId: jest.Mock;
     upsertMyProfile: jest.Mock;
+  };
+  let contentService: {
+    create: jest.Mock;
+    listPublished: jest.Mock;
+    listMine: jest.Mock;
+    getById: jest.Mock;
+    update: jest.Mock;
+    remove: jest.Mock;
   };
   let activeUserAuthRecord: UserAuthRecord;
   let pendingUserAuthRecord: UserAuthRecord;
@@ -107,6 +120,15 @@ describe('App (e2e)', () => {
       upsertMyProfile: jest.fn(),
     };
 
+    contentService = {
+      create: jest.fn(),
+      listPublished: jest.fn(),
+      listMine: jest.fn(),
+      getById: jest.fn(),
+      update: jest.fn(),
+      remove: jest.fn(),
+    };
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -135,6 +157,8 @@ describe('App (e2e)', () => {
       .useValue(tokenService)
       .overrideProvider(ProfileService)
       .useValue(profileService)
+      .overrideProvider(ContentService)
+      .useValue(contentService)
       .compile();
 
     app = moduleFixture.createNestApplication<NestFastifyApplication>(
@@ -923,6 +947,134 @@ describe('App (e2e)', () => {
 
       expect(response.statusCode).toBe(401);
       expect(profileService.getByUserId.mock.calls).toHaveLength(0);
+    });
+  });
+
+  describe('content', () => {
+    const contentItem = {
+      id: 'content-1',
+      authorId: 'user-1',
+      kind: 'ARTICLE',
+      status: 'DRAFT',
+      title: 'Title',
+      body: 'Body',
+      createdAt: new Date('2026-09-03T08:00:00.000Z'),
+      updatedAt: new Date('2026-09-03T08:00:00.000Z'),
+    };
+
+    const mockValidAccess = () => {
+      tokenService.verifyAccessToken.mockReturnValue({
+        sub: 'user-1',
+        sessionId: 'session-1',
+        roles: ['USER'],
+      });
+      sessionRepository.findById.mockResolvedValue({
+        id: 'session-1',
+        userId: 'user-1',
+        refreshTokenHash: 'stored-hash',
+        expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+        createdAt: new Date('2026-08-11T08:00:00.000Z'),
+        updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+        lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+        revokedAt: null,
+      });
+      userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+    };
+
+    it('/api/v1/content (POST) creates a draft', async () => {
+      mockValidAccess();
+      contentService.create.mockResolvedValue(contentItem);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/content',
+        headers: { authorization: 'Bearer valid-access-token' },
+        payload: { title: 'Title', body: 'Body', kind: 'ARTICLE' },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toMatchObject({
+        id: 'content-1',
+        status: 'DRAFT',
+      });
+    });
+
+    it('/api/v1/content (GET) lists published items', async () => {
+      mockValidAccess();
+      contentService.listPublished.mockResolvedValue({
+        items: [{ ...contentItem, status: 'PUBLISHED' }],
+        total: 1,
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/content?limit=10&offset=0',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ total: 1 });
+      expect(contentService.listPublished.mock.calls).toEqual([
+        [{ limit: 10, offset: 0 }],
+      ]);
+    });
+
+    it('/api/v1/content/:id (GET) returns 404 for a missing item', async () => {
+      mockValidAccess();
+      contentService.getById.mockRejectedValue(
+        new NotFoundException('Content not found'),
+      );
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/content/missing',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('/api/v1/content/:id (PATCH) updates an item', async () => {
+      mockValidAccess();
+      contentService.update.mockResolvedValue({
+        ...contentItem,
+        status: 'PUBLISHED',
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/content/content-1',
+        headers: { authorization: 'Bearer valid-access-token' },
+        payload: { status: 'PUBLISHED' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ status: 'PUBLISHED' });
+    });
+
+    it('/api/v1/content/:id (DELETE) removes an item', async () => {
+      mockValidAccess();
+      contentService.remove.mockResolvedValue(undefined);
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/content/content-1',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({});
+    });
+
+    it('/api/v1/content (POST) rejects unauthenticated requests', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/content',
+        payload: { title: 'Title', body: 'Body' },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(contentService.create.mock.calls).toHaveLength(0);
     });
   });
 
