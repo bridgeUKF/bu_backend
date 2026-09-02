@@ -49,6 +49,12 @@ describe('App (e2e)', () => {
     getById: jest.Mock;
     update: jest.Mock;
     remove: jest.Mock;
+    searchPublished: jest.Mock;
+    addFavorite: jest.Mock;
+    removeFavorite: jest.Mock;
+    listFavorites: jest.Mock;
+    setReaction: jest.Mock;
+    removeReaction: jest.Mock;
   };
   let activeUserAuthRecord: UserAuthRecord;
   let pendingUserAuthRecord: UserAuthRecord;
@@ -127,6 +133,12 @@ describe('App (e2e)', () => {
       getById: jest.fn(),
       update: jest.fn(),
       remove: jest.fn(),
+      searchPublished: jest.fn(),
+      addFavorite: jest.fn(),
+      removeFavorite: jest.fn(),
+      listFavorites: jest.fn(),
+      setReaction: jest.fn(),
+      removeReaction: jest.fn(),
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -1075,6 +1087,122 @@ describe('App (e2e)', () => {
 
       expect(response.statusCode).toBe(401);
       expect(contentService.create.mock.calls).toHaveLength(0);
+    });
+
+    it('/api/v1/content/search (GET) searches published items', async () => {
+      mockValidAccess();
+      contentService.searchPublished.mockResolvedValue({ items: [], total: 0 });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/content/search?q=guide&limit=10&offset=0',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(contentService.searchPublished.mock.calls).toEqual([
+        [{ q: 'guide', limit: 10, offset: 0 }],
+      ]);
+    });
+
+    it('/api/v1/content/search (GET) rejects a short query', async () => {
+      mockValidAccess();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/content/search?q=x',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(contentService.searchPublished.mock.calls).toHaveLength(0);
+    });
+
+    it('/api/v1/content/:id/favorite (POST) adds a favorite', async () => {
+      mockValidAccess();
+      contentService.addFavorite.mockResolvedValue({
+        favorite: { id: 'favorite-1' },
+        created: true,
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/content/content-1/favorite',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(201);
+    });
+
+    it('/api/v1/content/favorites/mine (GET) lists bookmarks', async () => {
+      mockValidAccess();
+      contentService.listFavorites.mockResolvedValue({ items: [], total: 0 });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/content/favorites/mine?limit=20&offset=0',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(contentService.listFavorites.mock.calls).toEqual([
+        ['user-1', { limit: 20, offset: 0 }],
+      ]);
+    });
+
+    it('/api/v1/content/:id/reaction (PUT) stores a vote', async () => {
+      mockValidAccess();
+      contentService.setReaction.mockResolvedValue({
+        reaction: { id: 'reaction-1' },
+        likeCount: 1,
+        dislikeCount: 0,
+      });
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/api/v1/content/content-1/reaction',
+        headers: { authorization: 'Bearer valid-access-token' },
+        payload: { value: 'LIKE' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ likeCount: 1, dislikeCount: 0 });
+      expect(contentService.setReaction.mock.calls).toEqual([
+        ['user-1', 'content-1', 'LIKE'],
+      ]);
+    });
+
+    it('/api/v1/content/:id/reaction (PUT) rejects an invalid value', async () => {
+      mockValidAccess();
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/api/v1/content/content-1/reaction',
+        headers: { authorization: 'Bearer valid-access-token' },
+        payload: { value: 'LOVE' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(contentService.setReaction.mock.calls).toHaveLength(0);
+    });
+
+    it('/api/v1/content/:id/reaction (DELETE) removes a vote', async () => {
+      mockValidAccess();
+      contentService.removeReaction.mockResolvedValue({
+        likeCount: 0,
+        dislikeCount: 0,
+      });
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/content/content-1/reaction',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(contentService.removeReaction.mock.calls).toEqual([
+        ['user-1', 'content-1'],
+      ]);
     });
   });
 

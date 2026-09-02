@@ -4,16 +4,26 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ContentKind, ContentStatus } from '@prisma/client';
+import { ContentKind, ContentStatus, ReactionValue } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.service';
 import {
   ContentList,
   ContentRecord,
   ContentRepository,
+  FavoriteRecord,
+  FavoriteRepository,
+  ReactionCounts,
+  ReactionRecord,
+  ReactionRepository,
   UpdateContentData,
 } from './content.repository';
 
-export type { ContentList, ContentRecord } from './content.repository';
+export type {
+  ContentList,
+  ContentRecord,
+  FavoriteRecord,
+  ReactionRecord,
+} from './content.repository';
 
 export type CreateContentInput = {
   kind: ContentKind;
@@ -33,12 +43,32 @@ export type ListPagination = {
   offset: number;
 };
 
+export type SearchInput = {
+  q: string;
+  kind?: ContentKind;
+  limit: number;
+  offset: number;
+};
+
+export type FavoriteResult = {
+  favorite: FavoriteRecord;
+  created: boolean;
+};
+
+export type ReactionResult = {
+  reaction: ReactionRecord;
+} & ReactionCounts;
+
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
 @Injectable()
 export class ContentService {
-  constructor(private readonly contentRepository: ContentRepository) {}
+  constructor(
+    private readonly contentRepository: ContentRepository,
+    private readonly favoriteRepository: FavoriteRepository,
+    private readonly reactionRepository: ReactionRepository,
+  ) {}
 
   create(authorId: string, input: CreateContentInput): Promise<ContentRecord> {
     return this.contentRepository.create({
@@ -147,6 +177,83 @@ export class ContentService {
     }
 
     await this.contentRepository.remove(id);
+  }
+
+  searchPublished(input: SearchInput): Promise<ContentList> {
+    return this.contentRepository.search({
+      q: input.q,
+      kind: input.kind,
+      ...this.normalizePagination(input),
+    });
+  }
+
+  async addFavorite(
+    userId: string,
+    contentId: string,
+  ): Promise<FavoriteResult> {
+    await this.requirePublished(contentId);
+
+    const existing = await this.favoriteRepository.findFavorite(
+      userId,
+      contentId,
+    );
+
+    if (existing) {
+      return { favorite: existing, created: false };
+    }
+
+    const favorite = await this.favoriteRepository.createFavorite(
+      userId,
+      contentId,
+    );
+
+    return { favorite, created: true };
+  }
+
+  removeFavorite(userId: string, contentId: string): Promise<void> {
+    return this.favoriteRepository.removeFavorite(userId, contentId);
+  }
+
+  listFavorites(
+    userId: string,
+    pagination: ListPagination,
+  ): Promise<ContentList> {
+    return this.favoriteRepository.listFavorites(
+      userId,
+      this.normalizePagination(pagination),
+    );
+  }
+
+  async setReaction(
+    userId: string,
+    contentId: string,
+    value: ReactionValue,
+  ): Promise<ReactionResult> {
+    await this.requirePublished(contentId);
+
+    return this.reactionRepository.upsertReactionAndRecount(
+      userId,
+      contentId,
+      value,
+    );
+  }
+
+  removeReaction(userId: string, contentId: string): Promise<ReactionCounts> {
+    return this.reactionRepository.removeReactionAndRecount(userId, contentId);
+  }
+
+  private async requirePublished(contentId: string): Promise<ContentRecord> {
+    const item = await this.contentRepository.findById(contentId);
+
+    if (!item) {
+      throw new NotFoundException('Content not found');
+    }
+
+    if (item.status !== ContentStatus.PUBLISHED) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    return item;
   }
 
   private canModerate(viewer: AuthenticatedUser): boolean {

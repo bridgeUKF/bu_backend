@@ -25,6 +25,11 @@ enum ContentStatus {
   ARCHIVED
 }
 
+enum ReactionValue {
+  LIKE
+  DISLIKE
+}
+
 model User {
   id              String     @id @default(uuid())
   email           String     @unique
@@ -41,6 +46,8 @@ model User {
   sessions        Session[]
   profile         StudentProfile?
   contents        ContentItem[]
+  favorites       Favorite[]
+  reactions       ContentReaction[]
 }
 
 model Role {
@@ -94,16 +101,46 @@ model StudentProfile {
 }
 
 model ContentItem {
-  id        String        @id @default(uuid())
-  authorId  String
-  kind      ContentKind   @default(ARTICLE)
-  status    ContentStatus @default(DRAFT)
-  title     String
-  body      String
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  id           String        @id @default(uuid())
+  authorId     String
+  kind         ContentKind   @default(ARTICLE)
+  status       ContentStatus @default(DRAFT)
+  title        String
+  body         String
+  likeCount    Int           @default(0)
+  dislikeCount Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  author       User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  favorites    Favorite[]
+  reactions    ContentReaction[]
 
   @@index([authorId])
   @@index([status, createdAt])
+}
+
+model Favorite {
+  id        String      @id @default(uuid())
+  userId    String
+  contentId String
+  createdAt DateTime    @default(now())
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   ContentItem @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contentId])
+  @@index([contentId])
+}
+
+model ContentReaction {
+  id        String        @id @default(uuid())
+  userId    String
+  contentId String
+  value     ReactionValue
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   ContentItem   @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contentId])
+  @@index([contentId])
 }
