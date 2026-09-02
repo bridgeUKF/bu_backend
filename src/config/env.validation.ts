@@ -12,6 +12,7 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRES_IN: z.string().min(1),
   JWT_REFRESH_EXPIRES_IN: z.string().min(1),
   FRONTEND_URL: z.string().url(),
+  MAIL_FROM: z.string().min(1).default('BridgeU <no-reply@localhost>'),
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
   SWAGGER_ENABLED: z.enum(['true', 'false']).default('true'),
   SWAGGER_PATH: z.string().min(1).default('api/docs'),

@@ -8,6 +8,7 @@ import { HealthModule } from './health/health.module';
 import { DatabaseModule } from './infrastructure/database/database.module';
 import { RedisModule } from './infrastructure/redis/redis.module';
 import { ContentModule } from './content/content.module';
+import { MailModule } from './mail/mail.module';
 import { ProfileModule } from './profile/profile.module';
 import { ReportModule } from './report/report.module';
 import { UserModule } from './user/user.module';
@@ -51,6 +52,7 @@ import { UserModule } from './user/user.module';
     RedisModule,
     HealthModule,
     ContentModule,
+    MailModule,
     ProfileModule,
     ReportModule,
     UserModule,

@@ -255,7 +255,7 @@ describe('App (e2e)', () => {
     expect(response.json()).not.toHaveProperty('passwordHash');
   });
 
-  it('/api/v1/auth/register (POST) returns a verification token', async () => {
+  it('/api/v1/auth/register (POST) does not expose any token', async () => {
     userService.findByEmail.mockResolvedValue(null);
     userService.createWithRole.mockResolvedValue(userRecord);
 
@@ -271,14 +271,8 @@ describe('App (e2e)', () => {
     });
 
     expect(response.statusCode).toBe(201);
-    const registerBody: unknown = response.json();
-    expect(registerBody).toMatchObject({
-      verificationToken: expect.any(String) as unknown,
-    });
-    const verificationToken = (registerBody as { verificationToken?: unknown })
-      .verificationToken;
-    expect(typeof verificationToken).toBe('string');
-    expect(verificationToken as string).toHaveLength(64);
+    expect(response.json()).not.toHaveProperty('verificationToken');
+    expect(response.json()).not.toHaveProperty('passwordHash');
   });
 
   it('/api/v1/auth/verify-email (POST) activates the user', async () => {
@@ -347,6 +341,47 @@ describe('App (e2e)', () => {
 
     expect(response.statusCode).toBe(400);
     expect(userService.activate.mock.calls).toHaveLength(0);
+  });
+
+  it('/api/v1/auth/resend-verification (POST) always returns 200', async () => {
+    userService.findByEmail.mockResolvedValue(null);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/resend-verification',
+      payload: { email: 'missing@example.com' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({});
+  });
+
+  it('/api/v1/auth/resend-verification (POST) resends for a pending user', async () => {
+    userService.findByEmail.mockResolvedValue({
+      ...userRecord,
+      passwordHash: 'hashed-password',
+      roles: [{ role: { name: 'USER' } }],
+    });
+    userService.update.mockResolvedValue(userRecord);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/resend-verification',
+      payload: { email: 'new@example.com' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(userService.update.mock.calls).toHaveLength(1);
+  });
+
+  it('/api/v1/auth/resend-verification (POST) rejects invalid bodies', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/resend-verification',
+      payload: { email: 'not-an-email' },
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 
   it('/api/v1/auth/register (POST) rejects duplicate email', async () => {

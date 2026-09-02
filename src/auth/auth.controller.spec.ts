@@ -223,17 +223,14 @@ describe('AuthController', () => {
   });
 
   describe('register', () => {
-    const registerResult = {
-      user: loginResult.user,
-      verificationToken: 'verify-token-123',
-    };
+    const registerResult = loginResult.user;
 
-    it('exposes the verification token outside production', async () => {
+    it('returns the safe user payload without any token', async () => {
       const authService = {
         register: jest.fn().mockResolvedValue(registerResult),
       };
       const configService = {
-        get: jest.fn().mockReturnValue('development'),
+        get: jest.fn(),
       };
       const controller = new AuthController(
         authService as unknown as AuthService,
@@ -247,33 +244,7 @@ describe('AuthController', () => {
           firstName: 'Grace',
           lastName: 'Hopper',
         }),
-      ).resolves.toEqual({
-        ...registerResult.user,
-        verificationToken: registerResult.verificationToken,
-      });
-    });
-
-    it('hides the verification token in production', async () => {
-      const authService = {
-        register: jest.fn().mockResolvedValue(registerResult),
-      };
-      const configService = {
-        get: jest.fn().mockReturnValue('production'),
-      };
-      const controller = new AuthController(
-        authService as unknown as AuthService,
-        configService as unknown as ConfigService,
-      );
-
-      const response = await controller.register({
-        email: 'new@example.com',
-        password: 'secret123',
-        firstName: 'Grace',
-        lastName: 'Hopper',
-      });
-
-      expect(response).toEqual(registerResult.user);
-      expect(response).not.toHaveProperty('verificationToken');
+      ).resolves.toEqual(registerResult);
     });
   });
 
@@ -292,6 +263,26 @@ describe('AuthController', () => {
       ).resolves.toEqual(loginResult.user);
 
       expect(authService.verifyEmail).toHaveBeenCalledWith('incoming-token');
+    });
+  });
+
+  describe('resendVerification', () => {
+    it('delegates to the service and returns an empty body', async () => {
+      const authService = {
+        resendVerification: jest.fn().mockResolvedValue(undefined),
+      };
+      const controller = new AuthController(
+        authService as unknown as AuthService,
+        {} as unknown as ConfigService,
+      );
+
+      await expect(
+        controller.resendVerification({ email: 'user@example.com' }),
+      ).resolves.toEqual({});
+
+      expect(authService.resendVerification).toHaveBeenCalledWith(
+        'user@example.com',
+      );
     });
   });
 

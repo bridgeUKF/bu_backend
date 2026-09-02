@@ -8,6 +8,7 @@ import * as argon2 from 'argon2';
 import { createHash } from 'crypto';
 import { UserAuthRecord, UserRecord } from '../user/user.repository';
 import { UserService } from '../user/user.service';
+import { MailService } from '../mail/mail.service';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -25,6 +26,9 @@ describe('AuthService', () => {
   let tokenService: {
     generateAccessToken: jest.Mock;
     verifyAccessToken: jest.Mock;
+  };
+  let mailService: {
+    sendVerificationEmail: jest.Mock;
   };
   let sessionRepository: {
     create: jest.Mock;
@@ -97,6 +101,10 @@ describe('AuthService', () => {
       verifyAccessToken: jest.fn(),
     };
 
+    mailService = {
+      sendVerificationEmail: jest.fn(),
+    };
+
     sessionRepository = {
       create: jest.fn().mockResolvedValue({
         id: 'session-1',
@@ -119,6 +127,7 @@ describe('AuthService', () => {
       userService,
       tokenService as unknown as TokenService,
       sessionRepository as unknown as SessionRepository,
+      mailService as unknown as MailService,
     );
     hashMock = jest.mocked(argon2.hash);
     verifyMock = jest.mocked(argon2.verify);
@@ -258,9 +267,7 @@ describe('AuthService', () => {
 
     const result = await authService.register(registerDto);
 
-    expect(result.user).toEqual(userRecord);
-    expect(typeof result.verificationToken).toBe('string');
-    expect(result.verificationToken).toHaveLength(64);
+    expect(result).toEqual(userRecord);
 
     expect(userService.findByEmail.mock.calls).toEqual([[registerDto.email]]);
     expect(hashMock.mock.calls).toEqual([[registerDto.password]]);
@@ -275,8 +282,8 @@ describe('AuthService', () => {
       lastName: registerDto.lastName,
       status: UserStatus.PENDING,
       emailVerifiedAt: null,
-      emailVerificationTokenHash: sha256hex(result.verificationToken),
     });
+    expect(typeof createData.emailVerificationTokenHash).toBe('string');
     expect(
       (
         createData as unknown as {
@@ -729,6 +736,59 @@ describe('AuthService', () => {
       );
 
       expect(userService.activate.mock.calls).toHaveLength(0);
+    });
+  });
+
+  describe('resendVerification', () => {
+    it('rotates the token and sends a new verification email', async () => {
+      userService.findByEmail.mockResolvedValue({
+        ...userAuthRecord,
+        status: UserStatus.PENDING,
+      });
+      userService.update.mockResolvedValue(userRecord);
+
+      await expect(
+        authService.resendVerification('  New@Example.com '),
+      ).resolves.toBeUndefined();
+
+      expect(userService.findByEmail.mock.calls).toEqual([['new@example.com']]);
+      expect(userService.update.mock.calls).toHaveLength(1);
+      const [userId, updateData] = userService.update.mock.calls[0];
+      expect(userId).toBe(userAuthRecord.id);
+      expect(
+        typeof (
+          updateData as unknown as { emailVerificationTokenHash?: unknown }
+        ).emailVerificationTokenHash,
+      ).toBe('string');
+      expect(mailService.sendVerificationEmail.mock.calls).toHaveLength(1);
+      expect(mailService.sendVerificationEmail.mock.calls).toEqual([
+        [userAuthRecord.email, expect.any(String)],
+      ]);
+    });
+
+    it('silently ignores unknown emails', async () => {
+      userService.findByEmail.mockResolvedValue(null);
+
+      await expect(
+        authService.resendVerification('missing@example.com'),
+      ).resolves.toBeUndefined();
+
+      expect(userService.update.mock.calls).toHaveLength(0);
+      expect(mailService.sendVerificationEmail.mock.calls).toHaveLength(0);
+    });
+
+    it('silently ignores already active users', async () => {
+      userService.findByEmail.mockResolvedValue({
+        ...userAuthRecord,
+        status: UserStatus.ACTIVE,
+      });
+
+      await expect(
+        authService.resendVerification(userAuthRecord.email),
+      ).resolves.toBeUndefined();
+
+      expect(userService.update.mock.calls).toHaveLength(0);
+      expect(mailService.sendVerificationEmail.mock.calls).toHaveLength(0);
     });
   });
 

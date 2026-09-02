@@ -20,6 +20,7 @@ export const appConfig = registerAs('app', () => {
     apiPrefix: 'api',
     apiVersion: '1',
     frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:3000',
+    mailFrom: process.env.MAIL_FROM ?? 'BridgeU <no-reply@localhost>',
     corsOrigins,
     swaggerEnabled: (process.env.SWAGGER_ENABLED ?? 'true') === 'true',
     swaggerPath: process.env.SWAGGER_PATH ?? 'api/docs',

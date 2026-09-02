@@ -8,6 +8,7 @@ import { Prisma, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'crypto';
 import { UserAuthRecord, UserRecord, UserService } from '../user/user.service';
+import { MailService } from '../mail/mail.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SessionRepository } from './session.repository';
@@ -17,11 +18,6 @@ export type LoginResponse = {
   accessToken: string;
   refreshToken: string;
   user: UserRecord;
-};
-
-export type RegisterResponse = {
-  user: UserRecord;
-  verificationToken: string;
 };
 
 export type AuthenticatedUser = {
@@ -46,6 +42,7 @@ export class AuthService {
     private readonly userService: UserService,
     private readonly tokenService: TokenService,
     private readonly sessionRepository: SessionRepository,
+    private readonly mailService: MailService,
   ) {}
 
   async login(loginDto: LoginDto): Promise<LoginResponse> {
@@ -180,7 +177,7 @@ export class AuthService {
     return this.sessionRepository.revokeAllForUser(userId);
   }
 
-  async register(registerDto: RegisterDto): Promise<RegisterResponse> {
+  async register(registerDto: RegisterDto): Promise<UserRecord> {
     const existingUser = await this.userService.findByEmail(registerDto.email);
 
     if (existingUser) {
@@ -207,7 +204,12 @@ export class AuthService {
         'USER',
       );
 
-      return { user, verificationToken };
+      await this.mailService.sendVerificationEmail(
+        user.email,
+        verificationToken,
+      );
+
+      return user;
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -218,6 +220,23 @@ export class AuthService {
 
       throw error;
     }
+  }
+
+  async resendVerification(email: string): Promise<void> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await this.userService.findByEmail(normalizedEmail);
+
+    if (!user || user.status !== UserStatus.PENDING) {
+      return;
+    }
+
+    const verificationToken = this.generateVerificationToken();
+
+    await this.userService.update(user.id, {
+      emailVerificationTokenHash: this.hashToken(verificationToken),
+      emailVerificationExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+    await this.mailService.sendVerificationEmail(user.email, verificationToken);
   }
 
   async verifyEmail(token: string | undefined): Promise<UserRecord> {

@@ -64,6 +64,8 @@ export type UpdateUserData = {
   firstName?: string;
   lastName?: string;
   passwordHash?: string;
+  emailVerificationTokenHash?: string | null;
+  emailVerificationExpiresAt?: Date | null;
 };
 
 export class RoleNotFoundError extends Error {
@@ -126,6 +128,8 @@ export class UserRepository {
         firstName: data.firstName,
         lastName: data.lastName,
         passwordHash: data.passwordHash,
+        emailVerificationTokenHash: data.emailVerificationTokenHash,
+        emailVerificationExpiresAt: data.emailVerificationExpiresAt,
       },
       select: userPublicSelect,
     });
