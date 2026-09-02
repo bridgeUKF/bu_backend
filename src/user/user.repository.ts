@@ -60,6 +60,12 @@ export type CreateUserRepositoryData = {
 
 export type RoleName = 'USER' | 'MODERATOR' | 'ADMIN';
 
+export type UpdateUserData = {
+  firstName?: string;
+  lastName?: string;
+  passwordHash?: string;
+};
+
 export class RoleNotFoundError extends Error {
   constructor(roleName: RoleName) {
     super(`Role "${roleName}" was not found`);
@@ -100,7 +106,6 @@ export class UserRepository {
       select: userVerificationSelect,
     });
   }
-
   activate(id: string): Promise<UserRecord> {
     return this.prismaService.user.update({
       where: { id },
@@ -109,6 +114,18 @@ export class UserRepository {
         emailVerifiedAt: new Date(),
         emailVerificationTokenHash: null,
         emailVerificationExpiresAt: null,
+      },
+      select: userPublicSelect,
+    });
+  }
+
+  update(id: string, data: UpdateUserData): Promise<UserRecord> {
+    return this.prismaService.user.update({
+      where: { id },
+      data: {
+        firstName: data.firstName,
+        lastName: data.lastName,
+        passwordHash: data.passwordHash,
       },
       select: userPublicSelect,
     });

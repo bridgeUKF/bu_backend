@@ -32,6 +32,7 @@ describe('UserService', () => {
       activate: jest.fn(),
       create: jest.fn(),
       createWithRole: jest.fn(),
+      update: jest.fn(),
     } as unknown as jest.Mocked<UserRepository>;
 
     userService = new UserService(userRepository);
@@ -101,6 +102,18 @@ describe('UserService', () => {
 
     await expect(userService.activate('user-1')).resolves.toEqual(userRecord);
     expect(userRepository.activate.mock.calls).toEqual([['user-1']]);
+  });
+
+  it('update delegates partial updates to the repository', async () => {
+    const updated = { ...userRecord, firstName: 'Grace' };
+    userRepository.update.mockResolvedValue(updated);
+
+    await expect(
+      userService.update('user-1', { firstName: 'Grace' }),
+    ).resolves.toEqual(updated);
+    expect(userRepository.update.mock.calls).toEqual([
+      ['user-1', { firstName: 'Grace' }],
+    ]);
   });
 
   it('create delegates creation to the repository', async () => {

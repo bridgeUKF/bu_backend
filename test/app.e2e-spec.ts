@@ -15,6 +15,7 @@ import { PrismaService } from './../src/infrastructure/database/prisma.service';
 import { RedisHealthService } from './../src/infrastructure/redis/redis-health.service';
 import { SessionRepository } from './../src/auth/session.repository';
 import { TokenService } from './../src/auth/token.service';
+import { ProfileService } from './../src/profile/profile.service';
 import { type UserAuthRecord, UserService } from './../src/user/user.service';
 
 describe('App (e2e)', () => {
@@ -31,6 +32,10 @@ describe('App (e2e)', () => {
   let tokenService: {
     generateAccessToken: jest.Mock;
     verifyAccessToken: jest.Mock;
+  };
+  let profileService: {
+    getByUserId: jest.Mock;
+    upsertMyProfile: jest.Mock;
   };
   let activeUserAuthRecord: UserAuthRecord;
   let pendingUserAuthRecord: UserAuthRecord;
@@ -71,6 +76,7 @@ describe('App (e2e)', () => {
       activate: jest.fn(),
       create: jest.fn(),
       createWithRole: jest.fn(),
+      update: jest.fn(),
     } as unknown as jest.Mocked<UserService>;
 
     sessionRepository = {
@@ -94,6 +100,11 @@ describe('App (e2e)', () => {
     tokenService = {
       generateAccessToken: jest.fn().mockReturnValue('test-access-token'),
       verifyAccessToken: jest.fn(),
+    };
+
+    profileService = {
+      getByUserId: jest.fn(),
+      upsertMyProfile: jest.fn(),
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -122,6 +133,8 @@ describe('App (e2e)', () => {
       .useValue(sessionRepository)
       .overrideProvider(TokenService)
       .useValue(tokenService)
+      .overrideProvider(ProfileService)
+      .useValue(profileService)
       .compile();
 
     app = moduleFixture.createNestApplication<NestFastifyApplication>(
@@ -640,6 +653,277 @@ describe('App (e2e)', () => {
 
     expect(response.statusCode).toBe(401);
     expect(sessionRepository.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('/api/v1/auth/me (PATCH) updates the profile', async () => {
+    tokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-1',
+      sessionId: 'session-1',
+      roles: ['USER'],
+    });
+    sessionRepository.findById.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      refreshTokenHash: 'stored-hash',
+      expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+      createdAt: new Date('2026-08-11T08:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+      lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+      revokedAt: null,
+    });
+    userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+    userService.update.mockResolvedValue({
+      ...userRecord,
+      status: UserStatus.ACTIVE,
+      firstName: 'Grace',
+    });
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/auth/me',
+      headers: { authorization: 'Bearer valid-access-token' },
+      payload: { firstName: 'Grace' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id: userRecord.id,
+      firstName: 'Grace',
+    });
+    expect(response.json()).not.toHaveProperty('passwordHash');
+    expect(userService.update.mock.calls).toEqual([
+      ['user-1', { firstName: 'Grace' }],
+    ]);
+  });
+
+  it('/api/v1/auth/me (PATCH) rejects an empty body', async () => {
+    tokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-1',
+      sessionId: 'session-1',
+      roles: ['USER'],
+    });
+    sessionRepository.findById.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      refreshTokenHash: 'stored-hash',
+      expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+      createdAt: new Date('2026-08-11T08:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+      lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+      revokedAt: null,
+    });
+    userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/auth/me',
+      headers: { authorization: 'Bearer valid-access-token' },
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('/api/v1/auth/change-password (POST) changes the password', async () => {
+    tokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-1',
+      sessionId: 'session-1',
+      roles: ['USER'],
+    });
+    sessionRepository.findById.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      refreshTokenHash: 'stored-hash',
+      expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+      createdAt: new Date('2026-08-11T08:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+      lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+      revokedAt: null,
+    });
+    userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+    userService.update.mockResolvedValue({
+      ...userRecord,
+      status: UserStatus.ACTIVE,
+    });
+    sessionRepository.revokeAllForUser.mockResolvedValue(1);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/change-password',
+      headers: { authorization: 'Bearer valid-access-token' },
+      payload: {
+        currentPassword: 'secret123',
+        newPassword: 'brand-new-secret123',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({});
+    expect(sessionRepository.revokeAllForUser).toHaveBeenCalledWith('user-1');
+  });
+
+  it('/api/v1/auth/change-password (POST) rejects a weak new password', async () => {
+    tokenService.verifyAccessToken.mockReturnValue({
+      sub: 'user-1',
+      sessionId: 'session-1',
+      roles: ['USER'],
+    });
+    sessionRepository.findById.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      refreshTokenHash: 'stored-hash',
+      expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+      createdAt: new Date('2026-08-11T08:00:00.000Z'),
+      updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+      lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+      revokedAt: null,
+    });
+    userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/change-password',
+      headers: { authorization: 'Bearer valid-access-token' },
+      payload: {
+        currentPassword: 'secret123',
+        newPassword: 'short',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(userService.update.mock.calls).toHaveLength(0);
+  });
+
+  describe('student profile', () => {
+    const profileRecord = {
+      id: 'profile-1',
+      userId: 'user-1',
+      university: 'Bridge University',
+      faculty: 'Computer Science',
+      studyYear: 2,
+      bio: null,
+      city: null,
+      telegram: null,
+      github: null,
+      linkedin: null,
+      website: null,
+      interests: [],
+      createdAt: new Date('2026-09-03T08:00:00.000Z'),
+      updatedAt: new Date('2026-09-03T08:00:00.000Z'),
+    };
+
+    const mockValidAccess = () => {
+      tokenService.verifyAccessToken.mockReturnValue({
+        sub: 'user-1',
+        sessionId: 'session-1',
+        roles: ['USER'],
+      });
+      sessionRepository.findById.mockResolvedValue({
+        id: 'session-1',
+        userId: 'user-1',
+        refreshTokenHash: 'stored-hash',
+        expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+        createdAt: new Date('2026-08-11T08:00:00.000Z'),
+        updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+        lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+        revokedAt: null,
+      });
+      userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+    };
+
+    it('/api/v1/profile/me (PUT) creates or updates the own profile', async () => {
+      mockValidAccess();
+      profileService.upsertMyProfile.mockResolvedValue(profileRecord);
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/api/v1/profile/me',
+        headers: { authorization: 'Bearer valid-access-token' },
+        payload: { university: 'Bridge University', studyYear: 2 },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        id: 'profile-1',
+        userId: 'user-1',
+        university: 'Bridge University',
+        studyYear: 2,
+      });
+      expect(profileService.upsertMyProfile.mock.calls).toEqual([
+        ['user-1', { university: 'Bridge University', studyYear: 2 }],
+      ]);
+    });
+
+    it('/api/v1/profile/me (PUT) rejects an invalid study year', async () => {
+      mockValidAccess();
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/api/v1/profile/me',
+        headers: { authorization: 'Bearer valid-access-token' },
+        payload: { studyYear: 99 },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(profileService.upsertMyProfile.mock.calls).toHaveLength(0);
+    });
+
+    it('/api/v1/profile/me (GET) returns the own profile', async () => {
+      mockValidAccess();
+      profileService.getByUserId.mockResolvedValue(profileRecord);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/profile/me',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        id: 'profile-1',
+        userId: 'user-1',
+      });
+    });
+
+    it('/api/v1/profile/me (GET) returns 404 when there is no profile', async () => {
+      mockValidAccess();
+      profileService.getByUserId.mockResolvedValue(null);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/profile/me',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('/api/v1/profile/:userId (GET) returns another user profile', async () => {
+      mockValidAccess();
+      profileService.getByUserId.mockResolvedValue({
+        ...profileRecord,
+        userId: 'other-user',
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/profile/other-user',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(profileService.getByUserId.mock.calls).toEqual([['other-user']]);
+    });
+
+    it('/api/v1/profile/:userId (GET) rejects unauthenticated requests', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/profile/other-user',
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(profileService.getByUserId.mock.calls).toHaveLength(0);
+    });
   });
 
   afterEach(async () => {

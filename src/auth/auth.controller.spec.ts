@@ -294,4 +294,61 @@ describe('AuthController', () => {
       expect(authService.verifyEmail).toHaveBeenCalledWith('incoming-token');
     });
   });
+
+  describe('updateMe', () => {
+    it('delegates the profile update to the service', async () => {
+      const authService = {
+        updateMe: jest.fn().mockResolvedValue(loginResult.user),
+      };
+      const controller = new AuthController(
+        authService as unknown as AuthService,
+        {} as unknown as ConfigService,
+      );
+      const authUser = {
+        id: 'user-1',
+        sessionId: 'session-1',
+        roles: ['USER'],
+        user: loginResult.user,
+      };
+
+      await expect(
+        controller.updateMe(authUser, { firstName: 'Grace' }),
+      ).resolves.toEqual(loginResult.user);
+
+      expect(authService.updateMe).toHaveBeenCalledWith('user-1', {
+        firstName: 'Grace',
+      });
+    });
+  });
+
+  describe('changePassword', () => {
+    it('delegates the password change to the service', async () => {
+      const authService = {
+        changePassword: jest.fn().mockResolvedValue(undefined),
+      };
+      const controller = new AuthController(
+        authService as unknown as AuthService,
+        {} as unknown as ConfigService,
+      );
+      const authUser = {
+        id: 'user-1',
+        sessionId: 'session-1',
+        roles: ['USER'],
+        user: loginResult.user,
+      };
+
+      await expect(
+        controller.changePassword(authUser, {
+          currentPassword: 'old-secret',
+          newPassword: 'new-secret123',
+        }),
+      ).resolves.toEqual({});
+
+      expect(authService.changePassword).toHaveBeenCalledWith(
+        'user-1',
+        'old-secret',
+        'new-secret123',
+      );
+    });
+  });
 });

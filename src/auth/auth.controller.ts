@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   Res,
@@ -14,8 +15,10 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AuthService } from './auth.service';
 import type { AuthenticatedUser } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
@@ -87,6 +90,31 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() authUser: AuthenticatedUser) {
     return authUser.user;
+  }
+
+  @Patch('me')
+  @UseGuards(JwtAuthGuard)
+  updateMe(
+    @CurrentUser() authUser: AuthenticatedUser,
+    @Body() updateMeDto: UpdateMeDto,
+  ) {
+    return this.authService.updateMe(authUser.id, updateMeDto);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @CurrentUser() authUser: AuthenticatedUser,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
+    await this.authService.changePassword(
+      authUser.id,
+      changePasswordDto.currentPassword,
+      changePasswordDto.newPassword,
+    );
+
+    return {};
   }
 
   @Post('logout')

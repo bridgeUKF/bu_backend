@@ -3,6 +3,7 @@ import { UserStatus } from '@prisma/client';
 import {
   CreateUserRepositoryData,
   RoleName,
+  UpdateUserData,
   UserAuthRecord,
   UserRecord,
   UserRepository,
@@ -10,6 +11,7 @@ import {
 } from './user.repository';
 
 export type {
+  UpdateUserData,
   UserAuthRecord,
   UserRecord,
   UserVerificationRecord,
@@ -50,6 +52,10 @@ export class UserService {
 
   activate(id: string): Promise<UserRecord> {
     return this.userRepository.activate(id);
+  }
+
+  update(id: string, data: UpdateUserData): Promise<UserRecord> {
+    return this.userRepository.update(id, data);
   }
 
   create(data: CreateUserData): Promise<UserRecord> {

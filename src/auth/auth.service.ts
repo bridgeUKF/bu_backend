@@ -39,6 +39,9 @@ export class AuthService {
   private static readonly invalidAccessTokenMessage = 'Invalid access token';
   private static readonly invalidVerificationTokenMessage =
     'Invalid or expired verification token';
+  private static readonly invalidCurrentPasswordMessage =
+    'Invalid current password';
+  private static readonly nothingToUpdateMessage = 'Nothing to update';
   constructor(
     private readonly userService: UserService,
     private readonly tokenService: TokenService,
@@ -240,6 +243,49 @@ export class AuthService {
     }
 
     return this.userService.activate(record.id);
+  }
+
+  async updateMe(
+    userId: string,
+    data: { firstName?: string; lastName?: string },
+  ): Promise<UserRecord> {
+    if (!data.firstName && !data.lastName) {
+      throw new BadRequestException(AuthService.nothingToUpdateMessage);
+    }
+
+    return this.userService.update(userId, {
+      firstName: data.firstName,
+      lastName: data.lastName,
+    });
+  }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.userService.findAuthById(userId);
+
+    if (!user) {
+      throw new UnauthorizedException(
+        AuthService.invalidCurrentPasswordMessage,
+      );
+    }
+
+    const passwordMatches = await argon2.verify(
+      user.passwordHash,
+      currentPassword,
+    );
+
+    if (!passwordMatches) {
+      throw new UnauthorizedException(
+        AuthService.invalidCurrentPasswordMessage,
+      );
+    }
+
+    const passwordHash = await argon2.hash(newPassword);
+    await this.userService.update(userId, { passwordHash });
+    await this.sessionRepository.revokeAllForUser(userId);
   }
 
   private generateRefreshToken(): string {

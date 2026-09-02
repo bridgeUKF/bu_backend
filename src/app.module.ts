@@ -7,6 +7,7 @@ import { validateEnv } from './config/env.validation';
 import { HealthModule } from './health/health.module';
 import { DatabaseModule } from './infrastructure/database/database.module';
 import { RedisModule } from './infrastructure/redis/redis.module';
+import { ProfileModule } from './profile/profile.module';
 import { UserModule } from './user/user.module';
 
 @Module({
@@ -47,6 +48,7 @@ import { UserModule } from './user/user.module';
     DatabaseModule,
     RedisModule,
     HealthModule,
+    ProfileModule,
     UserModule,
   ],
 })

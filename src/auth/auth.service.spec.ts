@@ -89,6 +89,7 @@ describe('AuthService', () => {
       activate: jest.fn(),
       create: jest.fn(),
       createWithRole: jest.fn(),
+      update: jest.fn(),
     } as unknown as jest.Mocked<UserService>;
 
     tokenService = {
@@ -728,6 +729,81 @@ describe('AuthService', () => {
       );
 
       expect(userService.activate.mock.calls).toHaveLength(0);
+    });
+  });
+
+  describe('updateMe', () => {
+    it('updates the provided fields and returns the safe payload', async () => {
+      const updated: UserRecord = { ...userRecord, firstName: 'Grace' };
+      userService.update.mockResolvedValue(updated);
+
+      await expect(
+        authService.updateMe('user-1', { firstName: 'Grace' }),
+      ).resolves.toEqual(updated);
+
+      expect(userService.update.mock.calls).toEqual([
+        ['user-1', { firstName: 'Grace' }],
+      ]);
+    });
+
+    it('rejects an empty update', async () => {
+      await expect(authService.updateMe('user-1', {})).rejects.toThrow(
+        new BadRequestException('Nothing to update'),
+      );
+
+      expect(userService.update.mock.calls).toHaveLength(0);
+    });
+
+    it('never returns passwordHash from updateMe', async () => {
+      userService.update.mockResolvedValue(userRecord);
+
+      const result = await authService.updateMe('user-1', {
+        lastName: 'Hopper',
+      });
+
+      expect(result).not.toHaveProperty('passwordHash');
+    });
+  });
+
+  describe('changePassword', () => {
+    const activeRecord: UserAuthRecord = {
+      ...userAuthRecord,
+      status: UserStatus.ACTIVE,
+      passwordHash: 'current-hash',
+    };
+
+    beforeEach(() => {
+      userService.findAuthById.mockResolvedValue(activeRecord);
+    });
+
+    it('changes the password and revokes all sessions', async () => {
+      verifyMock.mockResolvedValue(true);
+      hashMock.mockResolvedValue('new-hash');
+      userService.update.mockResolvedValue(userRecord);
+      sessionRepository.revokeAllForUser.mockResolvedValue(2);
+
+      await expect(
+        authService.changePassword('user-1', 'old-secret', 'new-secret123'),
+      ).resolves.toBeUndefined();
+
+      expect(verifyMock).toHaveBeenCalledWith('current-hash', 'old-secret');
+      expect(hashMock).toHaveBeenCalledWith('new-secret123');
+      expect(userService.update.mock.calls).toEqual([
+        ['user-1', { passwordHash: 'new-hash' }],
+      ]);
+      expect(sessionRepository.revokeAllForUser).toHaveBeenCalledWith('user-1');
+    });
+
+    it('rejects a wrong current password without touching anything', async () => {
+      verifyMock.mockResolvedValue(false);
+
+      await expect(
+        authService.changePassword('user-1', 'wrong-secret', 'new-secret123'),
+      ).rejects.toThrow(new UnauthorizedException('Invalid current password'));
+
+      expect(hashMock.mock.calls).toHaveLength(0);
+      expect(userService.update.mock.calls).toHaveLength(0);
+      expect(sessionRepository.revokeAllForUser).not.toHaveBeenCalled();
     });
   });
 });
