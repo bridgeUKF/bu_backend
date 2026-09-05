@@ -663,7 +663,7 @@ describe('AuthService', () => {
       email: registerDto.email,
       status: UserStatus.PENDING,
       emailVerificationTokenHash: 'stored-token-hash',
-      emailVerificationExpiresAt: new Date('2026-09-03T08:00:00.000Z'),
+      emailVerificationExpiresAt: new Date('2027-09-03T08:00:00.000Z'),
     };
 
     const setupValidToken = (token: string) => {

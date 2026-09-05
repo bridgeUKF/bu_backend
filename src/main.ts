@@ -1,6 +1,7 @@
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import multipart from '@fastify/multipart';
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -26,6 +27,9 @@ async function bootstrap() {
 
   await app.register(helmet);
   await app.register(cookie);
+  await app.register(multipart, {
+    limits: { fileSize: 2 * 1024 * 1024 },
+  });
   await app.register(cors, {
     origin: configService.get<string[]>('app.corsOrigins') ?? false,
     credentials: true,
@@ -48,8 +52,16 @@ async function bootstrap() {
   if (configService.get<boolean>('app.swaggerEnabled')) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('BridgeU API')
+      .setDescription(
+        'BridgeU backend: auth (register → verify → login → refresh rotation → me/logout), profiles, content + social, reports moderation.',
+      )
       .setVersion('v1')
       .addBearerAuth()
+      .addCookieAuth('refresh_token', {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'refresh_token',
+      })
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
 

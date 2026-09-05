@@ -1,4 +1,5 @@
 import cookie from '@fastify/cookie';
+import multipart from '@fastify/multipart';
 import {
   NotFoundException,
   ValidationPipe,
@@ -42,6 +43,8 @@ describe('App (e2e)', () => {
   let profileService: {
     getByUserId: jest.Mock;
     upsertMyProfile: jest.Mock;
+    setAvatar: jest.Mock;
+    removeAvatar: jest.Mock;
   };
   let contentService: {
     create: jest.Mock;
@@ -130,6 +133,8 @@ describe('App (e2e)', () => {
     profileService = {
       getByUserId: jest.fn(),
       upsertMyProfile: jest.fn(),
+      setAvatar: jest.fn(),
+      removeAvatar: jest.fn(),
     };
 
     contentService = {
@@ -191,6 +196,9 @@ describe('App (e2e)', () => {
       new FastifyAdapter(),
     );
     await app.register(cookie);
+    await app.register(multipart, {
+      limits: { fileSize: 2 * 1024 * 1024 },
+    });
 
     const configService = app.get(ConfigService);
 
@@ -286,7 +294,7 @@ describe('App (e2e)', () => {
       email: userRecord.email,
       status: UserStatus.PENDING,
       emailVerificationTokenHash: 'stored-hash',
-      emailVerificationExpiresAt: new Date('2026-09-04T08:00:00.000Z'),
+      emailVerificationExpiresAt: new Date('2027-09-04T08:00:00.000Z'),
     });
     userService.activate.mockResolvedValue({
       ...userRecord,
@@ -1008,6 +1016,90 @@ describe('App (e2e)', () => {
 
       expect(response.statusCode).toBe(401);
       expect(profileService.getByUserId.mock.calls).toHaveLength(0);
+    });
+
+    it('/api/v1/profile/me/avatar (PUT) uploads the avatar', async () => {
+      mockValidAccess();
+      profileService.setAvatar.mockResolvedValue({
+        ...profileRecord,
+        avatarKey: 'avatars/user-1/key.png',
+        avatarUrl: 'https://pub-test.r2.dev/avatars/user-1/key.png',
+      });
+      const boundary = '----e2e-avatar-boundary';
+      const fileBytes = Buffer.from('fake-png-bytes', 'utf8');
+      const payload = Buffer.concat([
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="avatar.png"\r\nContent-Type: image/png\r\n\r\n`,
+          'utf8',
+        ),
+        fileBytes,
+        Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'),
+      ]);
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/api/v1/profile/me/avatar',
+        headers: {
+          authorization: 'Bearer valid-access-token',
+          'content-type': `multipart/form-data; boundary=${boundary}`,
+        },
+        payload,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        avatarKey: 'avatars/user-1/key.png',
+      });
+      expect(profileService.setAvatar.mock.calls).toEqual([
+        ['user-1', { buffer: fileBytes, mimetype: 'image/png', size: 14 }],
+      ]);
+    });
+
+    it('/api/v1/profile/me/avatar (PUT) rejects unauthenticated requests', async () => {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/api/v1/profile/me/avatar',
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(profileService.setAvatar.mock.calls).toHaveLength(0);
+    });
+
+    it('/api/v1/profile/me/avatar (DELETE) clears the avatar', async () => {
+      mockValidAccess();
+      profileService.removeAvatar.mockResolvedValue(profileRecord);
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/profile/me/avatar',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(profileService.removeAvatar.mock.calls).toEqual([['user-1']]);
+    });
+
+    it('/api/v1/profile/me/avatar (DELETE) returns 404 when there is no profile', async () => {
+      mockValidAccess();
+      profileService.removeAvatar.mockResolvedValue(null);
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/profile/me/avatar',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('/api/v1/profile/me/avatar (DELETE) rejects unauthenticated requests', async () => {
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/profile/me/avatar',
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(profileService.removeAvatar.mock.calls).toHaveLength(0);
     });
   });
 

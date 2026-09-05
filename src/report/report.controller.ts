@@ -10,6 +10,18 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBadRequestResponse,
+  ApiBearerAuth,
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../auth/auth.service';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -18,6 +30,8 @@ import { HandleReportDto } from './dto/handle-report.dto';
 import { ListReportsDto } from './dto/list-reports.dto';
 import { ReportService } from './report.service';
 
+@ApiTags('reports')
+@ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({
   path: 'reports',
@@ -28,6 +42,15 @@ export class ReportController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Report visible content (one report per user per content)',
+  })
+  @ApiCreatedResponse({ description: 'Created PENDING Report' })
+  @ApiConflictResponse({ description: 'Already reported' })
+  @ApiNotFoundResponse({ description: 'Content not found' })
+  @ApiForbiddenResponse({ description: 'No access to this content' })
+  @ApiBadRequestResponse({ description: 'Validation failed' })
+  @ApiUnauthorizedResponse({ description: 'Invalid access token' })
   create(
     @CurrentUser() authUser: AuthenticatedUser,
     @Body() createReportDto: CreateReportDto,
@@ -39,6 +62,10 @@ export class ReportController {
   }
 
   @Get()
+  @ApiOperation({ summary: 'List reports queue (MODERATOR/ADMIN only)' })
+  @ApiOkResponse({ description: '{ items (with content snapshot), total }' })
+  @ApiForbiddenResponse({ description: 'Moderator or admin only' })
+  @ApiUnauthorizedResponse({ description: 'Invalid access token' })
   list(
     @CurrentUser() authUser: AuthenticatedUser,
     @Query() query: ListReportsDto,
@@ -51,6 +78,14 @@ export class ReportController {
   }
 
   @Patch(':id')
+  @ApiOperation({
+    summary: 'Resolve or dismiss a report (MODERATOR/ADMIN only)',
+  })
+  @ApiOkResponse({ description: 'Updated Report' })
+  @ApiNotFoundResponse({ description: 'Report not found' })
+  @ApiForbiddenResponse({ description: 'Moderator or admin only' })
+  @ApiBadRequestResponse({ description: 'Already handled / validation failed' })
+  @ApiUnauthorizedResponse({ description: 'Invalid access token' })
   handle(
     @CurrentUser() authUser: AuthenticatedUser,
     @Param('id') id: string,

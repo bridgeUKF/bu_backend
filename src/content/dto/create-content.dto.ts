@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsEnum,
@@ -9,6 +10,7 @@ import {
 import { ContentKind } from '@prisma/client';
 
 export class CreateContentDto {
+  @ApiProperty({ example: 'How to pass exams', maxLength: 200 })
   @Transform(({ value }: { value: unknown }): unknown =>
     typeof value === 'string' ? value.trim() : value,
   )
@@ -18,6 +20,7 @@ export class CreateContentDto {
   @Matches(/\S/)
   title: string;
 
+  @ApiProperty({ example: 'Step by step guide...', maxLength: 50000 })
   @Transform(({ value }: { value: unknown }): unknown =>
     typeof value === 'string' ? value.trim() : value,
   )
@@ -26,6 +29,7 @@ export class CreateContentDto {
   @MaxLength(50000)
   body: string;
 
+  @ApiProperty({ enum: ContentKind, example: ContentKind.ARTICLE })
   @IsEnum(ContentKind)
   kind: ContentKind;
 }

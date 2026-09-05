@@ -11,6 +11,7 @@ import { ContentModule } from './content/content.module';
 import { MailModule } from './mail/mail.module';
 import { ProfileModule } from './profile/profile.module';
 import { ReportModule } from './report/report.module';
+import { StorageModule } from './storage/storage.module';
 import { UserModule } from './user/user.module';
 
 @Module({
@@ -55,6 +56,7 @@ import { UserModule } from './user/user.module';
     MailModule,
     ProfileModule,
     ReportModule,
+    StorageModule,
     UserModule,
   ],
 })

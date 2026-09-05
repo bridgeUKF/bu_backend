@@ -31,5 +31,11 @@ export const appConfig = registerAs('app', () => {
     jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
     jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN,
     jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN,
+    storageDriver: process.env.STORAGE_DRIVER ?? 'stub',
+    r2AccountId: process.env.R2_ACCOUNT_ID,
+    r2AccessKeyId: process.env.R2_ACCESS_KEY_ID,
+    r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    r2BucketName: process.env.R2_BUCKET_NAME,
+    r2PublicUrl: process.env.R2_PUBLIC_URL,
   };
 });

@@ -15,6 +15,8 @@ const profileSelect = {
   linkedin: true,
   website: true,
   interests: true,
+  avatarKey: true,
+  avatarUrl: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.StudentProfileSelect;
@@ -36,6 +38,11 @@ export type UpsertProfileData = {
   interests?: string[];
 };
 
+export type AvatarData = {
+  avatarKey: string;
+  avatarUrl: string;
+};
+
 @Injectable()
 export class ProfileRepository {
   constructor(private readonly prismaService: PrismaService) {}
@@ -55,6 +62,23 @@ export class ProfileRepository {
       where: { userId },
       create: { userId, ...data },
       update: { ...data },
+      select: profileSelect,
+    });
+  }
+
+  setAvatarByUserId(userId: string, data: AvatarData): Promise<ProfileRecord> {
+    return this.prismaService.studentProfile.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: { ...data },
+      select: profileSelect,
+    });
+  }
+
+  clearAvatarByUserId(userId: string): Promise<ProfileRecord> {
+    return this.prismaService.studentProfile.update({
+      where: { userId },
+      data: { avatarKey: null, avatarUrl: null },
       select: profileSelect,
     });
   }
