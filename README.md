@@ -32,6 +32,26 @@
 $ npm install
 ```
 
+## Run everything with Docker
+
+```bash
+# build + postgres + redis + migrations/seed + api (http://localhost:3001)
+$ docker compose up --build -d
+
+# check
+$ docker compose ps
+
+# stop (data in the postgres volume is kept)
+$ docker compose down
+```
+
+The app reads config from `.env` (`env_file`, never baked into the image).
+Inside Docker it talks to `postgres`/`redis` hostnames
+(`DATABASE_URL`/`REDIS_URL` are overridden in `docker-compose.yaml`);
+local `npm run start:dev` keeps using `localhost` from `.env` as before.
+Migrations + role seed run in the one-shot `migrate` service,
+never inside the app itself.
+
 ## Compile and run the project
 
 ```bash
