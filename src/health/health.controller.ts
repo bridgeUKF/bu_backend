@@ -1,8 +1,10 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { HealthService } from './health.service';
 
 @ApiTags('health')
+@SkipThrottle({ default: true, strict: true })
 @Controller({
   path: 'health',
   version: '1',

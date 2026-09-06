@@ -22,6 +22,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import type { AuthenticatedUser } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
@@ -46,6 +47,7 @@ export class AuthController {
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @Throttle({ strict: { limit: 10, ttl: 60000 } })
   @ApiOperation({
     summary: 'Register a new user (PENDING, verification email sent)',
   })
@@ -60,6 +62,7 @@ export class AuthController {
 
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ strict: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Verify email by token (PENDING → ACTIVE)' })
   @ApiOkResponse({ description: 'Email verified (ACTIVE UserRecord)' })
   @ApiBadRequestResponse({
@@ -71,6 +74,7 @@ export class AuthController {
 
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ strict: { limit: 10, ttl: 60000 } })
   @ApiOperation({
     summary: 'Resend verification email (always 200, anti-enumeration)',
   })
@@ -88,6 +92,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ strict: { limit: 10, ttl: 60000 } })
   @ApiOperation({
     summary: 'Login (ACTIVE only) → access JWT + refresh cookie',
   })
@@ -113,6 +118,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ strict: { limit: 10, ttl: 60000 } })
   @ApiOperation({
     summary: 'Rotate refresh token → new access JWT + new cookie',
   })

@@ -252,6 +252,19 @@ describe('App (e2e)', () => {
     });
   });
 
+  it('/api/v1/health (GET) stays unthrottled under burst load', async () => {
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 105; attempt += 1) {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/health',
+      });
+      statuses.push(response.statusCode);
+    }
+
+    expect(statuses.every((status) => status === 200)).toBe(true);
+  });
+
   it('/api/v1/auth/register (POST) creates a user', async () => {
     userService.findByEmail.mockResolvedValue(null);
     userService.createWithRole.mockResolvedValue(userRecord);
@@ -529,6 +542,26 @@ describe('App (e2e)', () => {
       message: 'Invalid email or password',
       error: 'Unauthorized',
     });
+  });
+
+  it('/api/v1/auth/login (POST) throttles past the strict limit with 429', async () => {
+    userService.findByEmail.mockResolvedValue(null);
+
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: {
+          email: 'missing@example.com',
+          password: 'secret123',
+        },
+      });
+      statuses.push(response.statusCode);
+    }
+
+    expect(statuses.slice(0, 10)).toEqual(new Array(10).fill(401));
+    expect(statuses[10]).toBe(429);
   });
 
   it('/api/v1/auth/login (POST) rejects a pending user', async () => {
@@ -1481,6 +1514,26 @@ describe('App (e2e)', () => {
 
       expect(response.statusCode).toBe(401);
       expect(reportService.report.mock.calls).toHaveLength(0);
+    });
+
+    it('/api/v1/reports (GET) is not capped by the strict auth bucket', async () => {
+      mockValidAccess();
+      reportService.listReports.mockResolvedValue({
+        items: [reportRecord],
+        total: 1,
+      });
+
+      const statuses: number[] = [];
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        const response = await app.inject({
+          method: 'GET',
+          url: '/api/v1/reports?limit=20&offset=0',
+          headers: { authorization: 'Bearer valid-access-token' },
+        });
+        statuses.push(response.statusCode);
+      }
+
+      expect(statuses.every((status) => status === 200)).toBe(true);
     });
   });
 
