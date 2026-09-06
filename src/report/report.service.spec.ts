@@ -7,6 +7,7 @@ import {
 import { ContentStatus, ReportReason, ReportStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.service';
 import type { ContentService } from '../content/content.service';
+import type { NotificationService } from '../notification/notification.service';
 import { ReportRepository } from './report.repository';
 import { ReportService } from './report.service';
 
@@ -65,6 +66,9 @@ describe('ReportService', () => {
   let contentService: {
     getById: jest.Mock;
   };
+  let notificationService: {
+    notify: jest.Mock;
+  };
 
   beforeEach(() => {
     reportRepository = {
@@ -77,10 +81,14 @@ describe('ReportService', () => {
     contentService = {
       getById: jest.fn(),
     };
+    notificationService = {
+      notify: jest.fn(),
+    };
 
     reportService = new ReportService(
       reportRepository as unknown as ReportRepository,
       contentService as unknown as ContentService,
+      notificationService as unknown as NotificationService,
     );
   });
 
@@ -156,6 +164,7 @@ describe('ReportService', () => {
       ...report,
       status: ReportStatus.RESOLVED,
     });
+    notificationService.notify.mockResolvedValue({ id: 'notification-1' });
 
     await expect(
       reportService.handleReport(moderator, 'report-1', ReportStatus.RESOLVED),
@@ -163,6 +172,40 @@ describe('ReportService', () => {
 
     expect(reportRepository.updateStatus.mock.calls).toEqual([
       ['report-1', ReportStatus.RESOLVED],
+    ]);
+    expect(notificationService.notify.mock.calls).toEqual([
+      [
+        'reporter-1',
+        {
+          type: 'REPORT_RESOLVED',
+          title: 'Your report has been resolved',
+          link: '/reports/report-1',
+        },
+      ],
+    ]);
+  });
+
+  it('handleReport notifies on dismiss as well', async () => {
+    reportRepository.findById.mockResolvedValue(report);
+    reportRepository.updateStatus.mockResolvedValue({
+      ...report,
+      status: ReportStatus.DISMISSED,
+    });
+    notificationService.notify.mockResolvedValue({ id: 'notification-1' });
+
+    await expect(
+      reportService.handleReport(moderator, 'report-1', ReportStatus.DISMISSED),
+    ).resolves.toMatchObject({ status: ReportStatus.DISMISSED });
+
+    expect(notificationService.notify.mock.calls).toEqual([
+      [
+        'reporter-1',
+        {
+          type: 'REPORT_RESOLVED',
+          title: 'Your report has been dismissed',
+          link: '/reports/report-1',
+        },
+      ],
     ]);
   });
 
@@ -177,6 +220,7 @@ describe('ReportService', () => {
     ).rejects.toThrow(new BadRequestException('Report already handled'));
 
     expect(reportRepository.updateStatus.mock.calls).toHaveLength(0);
+    expect(notificationService.notify.mock.calls).toHaveLength(0);
   });
 
   it('handleReport forbids plain users', async () => {

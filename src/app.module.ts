@@ -9,6 +9,7 @@ import { DatabaseModule } from './infrastructure/database/database.module';
 import { RedisModule } from './infrastructure/redis/redis.module';
 import { ContentModule } from './content/content.module';
 import { MailModule } from './mail/mail.module';
+import { NotificationModule } from './notification/notification.module';
 import { ProfileModule } from './profile/profile.module';
 import { ReportModule } from './report/report.module';
 import { StorageModule } from './storage/storage.module';
@@ -54,6 +55,7 @@ import { UserModule } from './user/user.module';
     HealthModule,
     ContentModule,
     MailModule,
+    NotificationModule,
     ProfileModule,
     ReportModule,
     StorageModule,

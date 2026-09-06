@@ -5,9 +5,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ReportReason, ReportStatus } from '@prisma/client';
+import { NotificationType, ReportReason, ReportStatus } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.service';
 import { ContentService } from '../content/content.service';
+import { NotificationService } from '../notification/notification.service';
 import {
   ReportList,
   ReportRecord,
@@ -34,6 +35,7 @@ export class ReportService {
   constructor(
     private readonly reportRepository: ReportRepository,
     private readonly contentService: ContentService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async report(
@@ -87,7 +89,18 @@ export class ReportService {
       throw new BadRequestException('Report already handled');
     }
 
-    return this.reportRepository.updateStatus(id, status);
+    const updated = await this.reportRepository.updateStatus(id, status);
+
+    await this.notificationService.notify(report.reporterId, {
+      type: NotificationType.REPORT_RESOLVED,
+      title:
+        status === ReportStatus.RESOLVED
+          ? 'Your report has been resolved'
+          : 'Your report has been dismissed',
+      link: `/reports/${report.id}`,
+    });
+
+    return updated;
   }
 
   private requireModerator(viewer: AuthenticatedUser): void {

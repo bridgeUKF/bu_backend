@@ -44,6 +44,10 @@ enum ReportStatus {
   DISMISSED
 }
 
+enum NotificationType {
+  REPORT_RESOLVED
+}
+
 model User {
   id              String     @id @default(uuid())
   email           String     @unique
@@ -63,6 +67,7 @@ model User {
   favorites       Favorite[]
   reactions       ContentReaction[]
   reports         Report[]
+  notifications Notification[]
 }
 
 model Role {
@@ -174,8 +179,22 @@ model ContentReaction {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  content   ContentItem   @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  content   ContentItem  @relation(fields: [contentId], references: [id], onDelete: Cascade)
 
   @@unique([userId, contentId])
   @@index([contentId])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

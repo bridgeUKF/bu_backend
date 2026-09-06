@@ -21,6 +21,7 @@ import { RedisHealthService } from './../src/infrastructure/redis/redis-health.s
 import { SessionRepository } from './../src/auth/session.repository';
 import { TokenService } from './../src/auth/token.service';
 import { ContentService } from './../src/content/content.service';
+import { NotificationService } from './../src/notification/notification.service';
 import { ReportService } from './../src/report/report.service';
 import { ProfileService } from './../src/profile/profile.service';
 import { type UserAuthRecord, UserService } from './../src/user/user.service';
@@ -64,6 +65,12 @@ describe('App (e2e)', () => {
     report: jest.Mock;
     listReports: jest.Mock;
     handleReport: jest.Mock;
+  };
+  let notificationService: {
+    listMine: jest.Mock;
+    markAsRead: jest.Mock;
+    markAllAsRead: jest.Mock;
+    notify: jest.Mock;
   };
   let activeUserAuthRecord: UserAuthRecord;
   let pendingUserAuthRecord: UserAuthRecord;
@@ -158,6 +165,13 @@ describe('App (e2e)', () => {
       handleReport: jest.fn(),
     };
 
+    notificationService = {
+      listMine: jest.fn(),
+      markAsRead: jest.fn(),
+      markAllAsRead: jest.fn(),
+      notify: jest.fn(),
+    };
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -190,6 +204,8 @@ describe('App (e2e)', () => {
       .useValue(contentService)
       .overrideProvider(ReportService)
       .useValue(reportService)
+      .overrideProvider(NotificationService)
+      .useValue(notificationService)
       .compile();
 
     app = moduleFixture.createNestApplication<NestFastifyApplication>(
@@ -1465,6 +1481,122 @@ describe('App (e2e)', () => {
 
       expect(response.statusCode).toBe(401);
       expect(reportService.report.mock.calls).toHaveLength(0);
+    });
+  });
+
+  describe('notifications', () => {
+    const notificationRecord = {
+      id: 'notification-1',
+      userId: 'user-1',
+      type: 'REPORT_RESOLVED',
+      title: 'Your report has been resolved',
+      body: null,
+      link: '/reports/report-1',
+      readAt: null,
+      createdAt: new Date('2026-09-03T08:00:00.000Z'),
+    };
+
+    const mockValidAccess = () => {
+      tokenService.verifyAccessToken.mockReturnValue({
+        sub: 'user-1',
+        sessionId: 'session-1',
+        roles: ['USER'],
+      });
+      sessionRepository.findById.mockResolvedValue({
+        id: 'session-1',
+        userId: 'user-1',
+        refreshTokenHash: 'stored-hash',
+        expiresAt: new Date('2026-09-14T08:00:00.000Z'),
+        createdAt: new Date('2026-08-11T08:00:00.000Z'),
+        updatedAt: new Date('2026-08-11T08:00:00.000Z'),
+        lastUsedAt: new Date('2026-08-11T08:00:00.000Z'),
+        revokedAt: null,
+      });
+      userService.findAuthById.mockResolvedValue(activeUserAuthRecord);
+    };
+
+    it('/api/v1/notifications (GET) returns own notifications', async () => {
+      mockValidAccess();
+      notificationService.listMine.mockResolvedValue({
+        items: [notificationRecord],
+        total: 1,
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/notifications?limit=20&offset=0',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ total: 1 });
+      expect(notificationService.listMine.mock.calls).toHaveLength(1);
+    });
+
+    it('/api/v1/notifications (GET) rejects unauthenticated requests', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/notifications',
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(notificationService.listMine.mock.calls).toHaveLength(0);
+    });
+
+    it('/api/v1/notifications/:id/read (PATCH) marks a notification', async () => {
+      mockValidAccess();
+      notificationService.markAsRead.mockResolvedValue({
+        ...notificationRecord,
+        readAt: new Date('2026-09-04T08:00:00.000Z'),
+      });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/notifications/notification-1/read',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ id: 'notification-1' });
+    });
+
+    it('/api/v1/notifications/:id/read (PATCH) returns 404 when missing', async () => {
+      mockValidAccess();
+      notificationService.markAsRead.mockRejectedValue(
+        new NotFoundException('Notification not found'),
+      );
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/notifications/missing/read',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('/api/v1/notifications/read-all (PATCH) marks every unread one', async () => {
+      mockValidAccess();
+      notificationService.markAllAsRead.mockResolvedValue({ read: 2 });
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/notifications/read-all',
+        headers: { authorization: 'Bearer valid-access-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ read: 2 });
+    });
+
+    it('/api/v1/notifications/read-all (PATCH) rejects unauthenticated requests', async () => {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/api/v1/notifications/read-all',
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(notificationService.markAllAsRead.mock.calls).toHaveLength(0);
     });
   });
 
